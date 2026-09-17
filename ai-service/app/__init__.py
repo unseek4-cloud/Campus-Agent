@@ -1,0 +1,2 @@
+"""CampusAgent AI service package."""
+
