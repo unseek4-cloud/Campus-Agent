@@ -1,7 +1,8 @@
+import re
 from functools import lru_cache
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +18,13 @@ class Settings(BaseSettings):
 
     chunk_size: int = Field(default=800, ge=100, le=10000)
     chunk_overlap: int = Field(default=100, ge=0)
+
+    ocr_enabled: bool = True
+    ocr_language: str = "ch"
+    ocr_dpi: int = Field(default=300, ge=72, le=600)
+    ocr_device: str = "cpu"
+    ocr_enable_mkldnn: bool = False
+    ocr_max_pages_per_document: int = Field(default=50, ge=1, le=1000)
 
     embedding_model_name: str = "BAAI/bge-small-zh-v1.5"
     embedding_device: str = "cpu"
@@ -38,6 +46,22 @@ class Settings(BaseSettings):
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be smaller than chunk_size")
         return self
+
+    @field_validator("ocr_language")
+    @classmethod
+    def validate_ocr_language(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("ocr_language must not be blank")
+        return value
+
+    @field_validator("ocr_device")
+    @classmethod
+    def validate_ocr_device(cls, value: str) -> str:
+        value = value.strip().lower()
+        if not re.fullmatch(r"(?:cpu|gpu(?::\d+)?)", value):
+            raise ValueError("ocr_device must be cpu, gpu, or gpu:<index>")
+        return value
 
 
 @lru_cache

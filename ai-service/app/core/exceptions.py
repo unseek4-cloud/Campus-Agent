@@ -18,6 +18,22 @@ class DocumentExtractionError(DocumentProcessingError):
     pass
 
 
+class PdfPageRenderingError(DocumentProcessingError):
+    pass
+
+
+class OcrError(DocumentProcessingError):
+    pass
+
+
+class OcrUnavailableError(OcrError):
+    pass
+
+
+class OcrPageLimitExceededError(DocumentProcessingError):
+    pass
+
+
 class EmptyDocumentError(DocumentProcessingError):
     pass
 

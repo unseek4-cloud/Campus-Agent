@@ -19,7 +19,7 @@ scripts/      开发和运维脚本预留目录
 - npm 10+
 - JDK 21
 - Maven 3.6.3+
-- Python 3.11+
+- Python 3.11–3.13（AI 服务 OCR 当前在 Python 3.12 上验证）
 - MySQL 8.x
 
 ## 启动前端
@@ -85,4 +85,3 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - Java 后端负责业务、权限和 MySQL 数据。
 - Python 服务只承载 AI 能力；当前仅提供基础配置和健康检查。
 - 业务模块只能通过公开契约协作，禁止跨模块访问 Mapper、Entity 或数据表。
-

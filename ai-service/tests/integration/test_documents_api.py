@@ -1,7 +1,9 @@
+from datetime import datetime, timedelta
+
 from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_document_service
-from app.core.exceptions import EmptyDocumentError
+from app.core.exceptions import EmptyDocumentError, OcrPageLimitExceededError
 from app.domain.document import DocumentInput, DocumentProcessingResult
 from app.main import app
 
@@ -24,6 +26,11 @@ class EmptyDocumentService:
         raise EmptyDocumentError("PDF contains no extractable text")
 
 
+class OcrLimitDocumentService:
+    def process_pdf(self, document: DocumentInput) -> DocumentProcessingResult:
+        raise OcrPageLimitExceededError("PDF requires OCR for too many pages")
+
+
 def test_process_document_returns_unified_success_response() -> None:
     app.dependency_overrides[get_document_service] = SuccessfulDocumentService
     try:
@@ -41,6 +48,8 @@ def test_process_document_returns_unified_success_response() -> None:
     assert payload["code"] == "OK"
     assert payload["data"]["documentId"] == "doc-1"
     assert payload["data"]["chunkCount"] == 3
+    assert payload["timestamp"].endswith("+08:00")
+    assert datetime.fromisoformat(payload["timestamp"]).utcoffset() == timedelta(hours=8)
     assert response.headers["X-Request-Id"] == payload["requestId"]
 
 
@@ -57,4 +66,23 @@ def test_process_document_maps_expected_processing_error() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 422
-    assert response.json()["code"] == "DOCUMENT_HAS_NO_TEXT"
+    payload = response.json()
+    assert payload["code"] == "DOCUMENT_HAS_NO_TEXT"
+    assert payload["timestamp"].endswith("+08:00")
+    assert datetime.fromisoformat(payload["timestamp"]).utcoffset() == timedelta(hours=8)
+
+
+def test_process_document_maps_ocr_page_limit_error() -> None:
+    app.dependency_overrides[get_document_service] = OcrLimitDocumentService
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.post(
+                "/internal/v1/documents/process",
+                data={"documentId": "doc-1", "knowledgeBaseId": "kb-1"},
+                files={"file": ("scan.pdf", b"%PDF-test", "application/pdf")},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "OCR_PAGE_LIMIT_EXCEEDED"

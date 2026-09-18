@@ -55,9 +55,7 @@ class DocumentService:
         pages = self._extractor.extract(document.content)
         cleaned_pages = self._cleaner.clean_pages(pages)
         if not any(page.text for page in cleaned_pages):
-            raise EmptyDocumentError(
-                "PDF contains no extractable text; scanned PDFs require OCR"
-            )
+            raise EmptyDocumentError("PDF contains no usable text after extraction")
 
         chunks = self._chunk_service.split(cleaned_pages)
         if not chunks:

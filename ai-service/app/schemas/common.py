@@ -1,7 +1,9 @@
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from app.core.time import now_utc_plus_8
 
 T = TypeVar("T")
 
@@ -24,7 +26,7 @@ class ApiResponse(BaseModel, Generic[T]):
             message="success",
             data=data,
             requestId=request_id,
-            timestamp=datetime.now(UTC),
+            timestamp=now_utc_plus_8(),
         )
 
     @classmethod
@@ -34,6 +36,5 @@ class ApiResponse(BaseModel, Generic[T]):
             message=message,
             data=None,
             requestId=request_id,
-            timestamp=datetime.now(UTC),
+            timestamp=now_utc_plus_8(),
         )
-

@@ -12,6 +12,7 @@ from app.core.exceptions import (
     EmbeddingGenerationError,
     EmptyDocumentError,
     InvalidDocumentError,
+    OcrPageLimitExceededError,
     UnsupportedDocumentTypeError,
     VectorStoreOperationError,
 )
@@ -82,6 +83,17 @@ def register_exception_handlers(app: FastAPI) -> None:
             422,
             ApiResponse.error(
                 "DOCUMENT_HAS_NO_TEXT", str(exception), _request_id(request)
+            ),
+        )
+
+    @app.exception_handler(OcrPageLimitExceededError)
+    async def handle_ocr_page_limit(
+        request: Request, exception: OcrPageLimitExceededError
+    ) -> JSONResponse:
+        return _json_error(
+            422,
+            ApiResponse.error(
+                "OCR_PAGE_LIMIT_EXCEEDED", str(exception), _request_id(request)
             ),
         )
 
