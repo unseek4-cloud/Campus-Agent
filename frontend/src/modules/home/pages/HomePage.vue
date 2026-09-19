@@ -19,7 +19,12 @@
         <el-tag>Element Plus</el-tag>
         <el-tag>Axios</el-tag>
       </el-space>
+
+      <el-divider />
+
+      <router-link to="/knowledge/search">
+        <el-button type="primary">打开知识库检索测试</el-button>
+      </router-link>
     </el-card>
   </main>
 </template>
-

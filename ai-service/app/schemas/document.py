@@ -11,3 +11,10 @@ class DocumentProcessData(BaseModel):
     content_sha256: str = Field(alias="contentSha256")
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class DocumentDeleteData(BaseModel):
+    document_id: str = Field(alias="documentId")
+    deleted_vector_count: int = Field(alias="deletedVectorCount")
+
+    model_config = ConfigDict(populate_by_name=True)

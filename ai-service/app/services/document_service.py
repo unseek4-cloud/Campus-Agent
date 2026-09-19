@@ -21,9 +21,16 @@ from app.services.text_cleaner import TextCleaner
 from app.vector_store.base import VectorStore
 
 _ALLOWED_CONTENT_TYPES = {
-    "application/pdf",
-    "application/x-pdf",
-    "application/octet-stream",
+    "pdf": {
+        "application/pdf",
+        "application/x-pdf",
+        "application/octet-stream",
+    },
+    "docx": {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/octet-stream",
+        "application/zip",
+    },
 }
 
 
@@ -38,28 +45,40 @@ class DocumentService:
         embedding_service: EmbeddingService,
         vector_store: VectorStore,
         max_file_size_bytes: int,
+        docx_extractor: DocumentExtractor | None = None,
     ) -> None:
-        self._extractor = extractor
+        self._pdf_extractor = extractor
+        self._docx_extractor = docx_extractor
         self._cleaner = cleaner
         self._chunk_service = chunk_service
         self._embedding_service = embedding_service
         self._vector_store = vector_store
         self._max_file_size_bytes = max_file_size_bytes
 
-    def process_pdf(self, document: DocumentInput) -> DocumentProcessingResult:
+    def process_document(self, document: DocumentInput) -> DocumentProcessingResult:
         document_id = document.document_id.strip()
         knowledge_base_id = document.knowledge_base_id.strip()
         file_name = self._safe_file_name(document.file_name)
-        self._validate_document(document, document_id, knowledge_base_id, file_name)
+        file_type = self._file_type(file_name)
+        self._validate_document(
+            document, document_id, knowledge_base_id, file_name, file_type
+        )
 
-        pages = self._extractor.extract(document.content)
+        extractor = (
+            self._pdf_extractor if file_type == "pdf" else self._docx_extractor
+        )
+        if extractor is None:
+            raise UnsupportedDocumentTypeError(
+                f"No document extractor is configured for {file_type.upper()}"
+            )
+        pages = extractor.extract(document.content)
         cleaned_pages = self._cleaner.clean_pages(pages)
         if not any(page.text for page in cleaned_pages):
-            raise EmptyDocumentError("PDF contains no usable text after extraction")
+            raise EmptyDocumentError("Document contains no usable text after extraction")
 
         chunks = self._chunk_service.split(cleaned_pages)
         if not chunks:
-            raise EmptyDocumentError("PDF contains no text that can be chunked")
+            raise EmptyDocumentError("Document contains no text that can be chunked")
 
         embeddings = self._embedding_service.embed_documents(
             [chunk.text for chunk in chunks]
@@ -84,10 +103,16 @@ class DocumentService:
                     "document_id": document_id,
                     "knowledge_base_id": knowledge_base_id,
                     "file_name": file_name,
-                    "page_number": chunk.page_number,
+                    "file_type": file_type,
                     "chunk_index": chunk.chunk_index,
+                    "source": file_name,
                     "embedding_model": self._embedding_service.model_name,
                     "content_sha256": content_sha256,
+                    **(
+                        {"page_number": chunk.page_number}
+                        if chunk.page_number is not None
+                        else {}
+                    ),
                 },
             )
             for chunk, embedding in zip(chunks, embeddings, strict=True)
@@ -104,26 +129,51 @@ class DocumentService:
             content_sha256=content_sha256,
         )
 
+    def process_pdf(self, document: DocumentInput) -> DocumentProcessingResult:
+        """Backward-compatible alias retained for existing callers and tests."""
+        return self.process_document(document)
+
+    def delete_document_vectors(self, document_id: str) -> int:
+        normalized_document_id = document_id.strip()
+        if not normalized_document_id:
+            raise InvalidDocumentError("documentId must not be blank")
+        return self._vector_store.delete_document(normalized_document_id)
+
     def _validate_document(
         self,
         document: DocumentInput,
         document_id: str,
         knowledge_base_id: str,
         file_name: str,
+        file_type: str,
     ) -> None:
         if not document_id or not knowledge_base_id:
             raise InvalidDocumentError("documentId and knowledgeBaseId must not be blank")
-        if not file_name.lower().endswith(".pdf"):
-            raise UnsupportedDocumentTypeError("Only PDF files are supported")
-        if document.content_type and document.content_type.lower() not in _ALLOWED_CONTENT_TYPES:
-            raise UnsupportedDocumentTypeError("Only PDF files are supported")
+        if file_type not in _ALLOWED_CONTENT_TYPES:
+            raise UnsupportedDocumentTypeError("Only PDF and DOCX files are supported")
+        if (
+            document.content_type
+            and document.content_type.lower() not in _ALLOWED_CONTENT_TYPES[file_type]
+        ):
+            raise UnsupportedDocumentTypeError(
+                f"Content type is not valid for {file_type.upper()}"
+            )
         if not document.content:
-            raise InvalidDocumentError("Uploaded PDF is empty")
+            raise InvalidDocumentError("Uploaded document is empty")
         if len(document.content) > self._max_file_size_bytes:
-            raise DocumentTooLargeError("Uploaded PDF exceeds the configured size limit")
-        if not document.content.startswith(b"%PDF-"):
+            raise DocumentTooLargeError("Uploaded document exceeds the configured size limit")
+        if file_type == "pdf" and not document.content.startswith(b"%PDF-"):
             raise InvalidDocumentError("Uploaded file does not have a valid PDF header")
+        if file_type == "docx" and not document.content.startswith(b"PK"):
+            raise InvalidDocumentError("Uploaded file does not have a valid DOCX header")
 
     @staticmethod
     def _safe_file_name(file_name: str) -> str:
         return re.split(r"[\\/]", file_name.strip())[-1]
+
+    @staticmethod
+    def _file_type(file_name: str) -> str:
+        extension = file_name.rsplit(".", maxsplit=1)[-1].lower()
+        if "." not in file_name or extension not in _ALLOWED_CONTENT_TYPES:
+            raise UnsupportedDocumentTypeError("Only PDF and DOCX files are supported")
+        return extension

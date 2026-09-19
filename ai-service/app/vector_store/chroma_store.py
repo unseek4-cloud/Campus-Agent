@@ -4,7 +4,7 @@ from pathlib import Path
 import chromadb
 
 from app.core.exceptions import VectorStoreOperationError
-from app.domain.document import VectorRecord
+from app.domain.document import VectorRecord, VectorSearchResult
 from app.vector_store.base import VectorStore
 
 
@@ -42,3 +42,61 @@ class ChromaVectorStore(VectorStore):
                 )
         except Exception as exception:
             raise VectorStoreOperationError("Failed to persist document vectors") from exception
+
+    def delete_document(self, document_id: str) -> int:
+        try:
+            existing = self._collection.get(
+                where={"document_id": document_id},
+                include=[],
+            )
+            deleted_count = len(existing["ids"])
+            if deleted_count:
+                self._collection.delete(where={"document_id": document_id})
+            return deleted_count
+        except Exception as exception:
+            raise VectorStoreOperationError("Failed to delete document vectors") from exception
+
+    def similarity_search(
+        self,
+        query_embedding: Sequence[float],
+        top_k: int,
+        knowledge_base_id: str | None = None,
+    ) -> list[VectorSearchResult]:
+        if not query_embedding:
+            return []
+        if top_k <= 0:
+            raise ValueError("top_k must be greater than zero")
+
+        try:
+            if self._collection.count() == 0:
+                return []
+
+            where = (
+                {"knowledge_base_id": knowledge_base_id}
+                if knowledge_base_id
+                else None
+            )
+            result = self._collection.query(
+                query_embeddings=[list(query_embedding)],
+                n_results=top_k,
+                where=where,
+                include=["documents", "metadatas", "distances"],
+            )
+            documents = result.get("documents") or [[]]
+            metadatas = result.get("metadatas") or [[]]
+            distances = result.get("distances") or [[]]
+
+            matches: list[VectorSearchResult] = []
+            for document, metadata, distance in zip(
+                documents[0], metadatas[0], distances[0], strict=True
+            ):
+                matches.append(
+                    VectorSearchResult(
+                        content=document or "",
+                        score=1.0 - float(distance),
+                        metadata=dict(metadata or {}),
+                    )
+                )
+            return matches
+        except Exception as exception:
+            raise VectorStoreOperationError("Failed to search document vectors") from exception

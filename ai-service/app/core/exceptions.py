@@ -44,3 +44,11 @@ class EmbeddingGenerationError(DocumentProcessingError):
 
 class VectorStoreOperationError(DocumentProcessingError):
     pass
+
+
+class RerankError(Exception):
+    """The configured reranker could not score retrieval candidates."""
+
+
+class InvalidRetrievalRequestError(Exception):
+    """The retrieval request is syntactically valid but violates service limits."""

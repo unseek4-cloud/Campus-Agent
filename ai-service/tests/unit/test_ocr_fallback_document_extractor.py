@@ -9,7 +9,12 @@ from app.core.exceptions import (
     OcrUnavailableError,
     PdfPageRenderingError,
 )
-from app.domain.document import DocumentInput, DocumentPage, VectorRecord
+from app.domain.document import (
+    DocumentInput,
+    DocumentPage,
+    VectorRecord,
+    VectorSearchResult,
+)
 from app.services.chunk_service import BoundaryAwareChunkService
 from app.services.document_extractor import DocumentExtractor
 from app.services.document_service import DocumentService
@@ -76,6 +81,19 @@ class RecordingVectorStore(VectorStore):
         self, document_id: str, records: Sequence[VectorRecord]
     ) -> None:
         self.records = list(records)
+
+    def delete_document(self, document_id: str) -> int:
+        deleted_count = len(self.records)
+        self.records = []
+        return deleted_count
+
+    def similarity_search(
+        self,
+        query_embedding: Sequence[float],
+        top_k: int,
+        knowledge_base_id: str | None = None,
+    ) -> list[VectorSearchResult]:
+        return []
 
 
 def build_extractor(

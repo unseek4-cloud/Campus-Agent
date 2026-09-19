@@ -13,10 +13,16 @@ spring:
 app:
   version: 0.1.0-SNAPSHOT
 
+campus:
+  ai-service:
+    base-url: ${AI_SERVICE_BASE_URL:http://localhost:8000}
+  knowledge:
+    default-top-k: ${KNOWLEDGE_DEFAULT_TOP_K:5}
+    max-top-k: ${KNOWLEDGE_MAX_TOP_K:20}
+
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
   configuration:
     map-underscore-to-camel-case: true
   global-config:
     banner: false
-

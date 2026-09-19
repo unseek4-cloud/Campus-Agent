@@ -988,7 +988,6 @@ def build_document() -> None:
         "团队规模较小时可以一人承担多项职责，但验收口径仍需明确。影响接口和模块边界的变更通过 ADR 记录，API 以 OpenAPI 和契约测试为准，数据库变更使用版本化迁移脚本，避免依赖口头约定。",
     )
 
-    doc.add_page_break()
     add_section_heading(doc, "17 风险和应对措施")
     add_caption(doc, "表 7  主要风险清单")
     add_table(

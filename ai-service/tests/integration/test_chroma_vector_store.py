@@ -34,3 +34,24 @@ def test_chroma_store_replaces_all_records_for_document(tmp_path: Path) -> None:
     result = collection.get(where={"document_id": "doc-1"})
 
     assert result["ids"] == ["record-3"]
+
+
+def test_chroma_store_searches_filters_and_deletes_vectors(tmp_path: Path) -> None:
+    store = ChromaVectorStore(tmp_path, "search_documents", batch_size=10)
+    store.replace_document(
+        "doc-1",
+        [
+            record("nearest", "doc-1", 1.0),
+            record("farther", "doc-1", 0.0),
+        ],
+    )
+
+    results = store.similarity_search([1.0, 0.0, 0.5], top_k=2, knowledge_base_id="kb-1")
+
+    assert [result.content for result in results] == [
+        "document-nearest",
+        "document-farther",
+    ]
+    assert results[0].score > results[1].score
+    assert store.delete_document("doc-1") == 2
+    assert store.similarity_search([1.0, 0.0, 0.5], top_k=2) == []

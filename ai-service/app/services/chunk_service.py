@@ -64,7 +64,7 @@ class BoundaryAwareChunkService(ChunkService):
             if end >= text_length:
                 break
 
-            next_start = max(end - self._chunk_overlap, start + 1)
+            next_start = self._find_overlap_start(text, start, end)
             start = next_start
 
         return chunks
@@ -77,3 +77,25 @@ class BoundaryAwareChunkService(ChunkService):
             if position >= 0:
                 candidates.append(position + len(boundary))
         return max(candidates) if candidates else None
+
+    def _find_overlap_start(self, text: str, start: int, end: int) -> int:
+        if self._chunk_overlap == 0:
+            return end
+
+        target = max(end - self._chunk_overlap, start + 1)
+        earlier_boundaries: list[int] = []
+        later_boundaries: list[int] = []
+        for boundary in _BOUNDARIES:
+            earlier_position = text.rfind(boundary, start + 1, target)
+            if earlier_position >= 0:
+                earlier_boundaries.append(earlier_position + len(boundary))
+
+            later_position = text.find(boundary, target, end)
+            if later_position >= 0:
+                later_boundaries.append(later_position + len(boundary))
+
+        if earlier_boundaries:
+            return max(earlier_boundaries)
+        if later_boundaries:
+            return min(later_boundaries)
+        return target

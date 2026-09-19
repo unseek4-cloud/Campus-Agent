@@ -34,6 +34,18 @@ class Settings(BaseSettings):
     vector_store_collection: str = "campus_documents"
     vector_store_batch_size: int = Field(default=100, ge=1, le=5000)
 
+    retrieval_default_top_k: int = Field(default=5, ge=1, le=100)
+    retrieval_max_top_k: int = Field(default=20, ge=1, le=100)
+
+    rerank_enabled: bool = True
+    rerank_model_name: str = "BAAI/bge-reranker-base"
+    rerank_device: str = "cpu"
+    rerank_batch_size: int = Field(default=8, ge=1, le=512)
+    rerank_max_length: int = Field(default=512, ge=64, le=8192)
+    rerank_candidate_top_k: int = Field(default=10, ge=1, le=100)
+    rerank_temporal_evidence_enabled: bool = True
+    rerank_temporal_evidence_weight: float = Field(default=0.35, ge=0, le=1)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -45,6 +57,10 @@ class Settings(BaseSettings):
     def validate_chunk_settings(self) -> Self:
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be smaller than chunk_size")
+        if self.retrieval_default_top_k > self.retrieval_max_top_k:
+            raise ValueError(
+                "retrieval_default_top_k must not exceed retrieval_max_top_k"
+            )
         return self
 
     @field_validator("ocr_language")
@@ -53,6 +69,14 @@ class Settings(BaseSettings):
         value = value.strip()
         if not value:
             raise ValueError("ocr_language must not be blank")
+        return value
+
+    @field_validator("rerank_model_name")
+    @classmethod
+    def validate_rerank_model_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("rerank_model_name must not be blank")
         return value
 
     @field_validator("ocr_device")

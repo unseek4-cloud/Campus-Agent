@@ -3,7 +3,12 @@ from collections.abc import Sequence
 import pytest
 
 from app.core.exceptions import EmptyDocumentError, InvalidDocumentError
-from app.domain.document import DocumentInput, DocumentPage, VectorRecord
+from app.domain.document import (
+    DocumentInput,
+    DocumentPage,
+    VectorRecord,
+    VectorSearchResult,
+)
 from app.services.chunk_service import BoundaryAwareChunkService
 from app.services.document_extractor import DocumentExtractor
 from app.services.document_service import DocumentService
@@ -39,6 +44,19 @@ class RecordingVectorStore(VectorStore):
     ) -> None:
         self.document_id = document_id
         self.records = list(records)
+
+    def delete_document(self, document_id: str) -> int:
+        deleted_count = len(self.records)
+        self.records = []
+        return deleted_count
+
+    def similarity_search(
+        self,
+        query_embedding: Sequence[float],
+        top_k: int,
+        knowledge_base_id: str | None = None,
+    ) -> list[VectorSearchResult]:
+        return []
 
 
 def build_service(
@@ -80,6 +98,9 @@ def test_document_service_runs_pipeline_and_builds_metadata() -> None:
     assert result.chunk_count == len(store.records)
     assert store.document_id == "doc-1"
     assert store.records[0].metadata["knowledge_base_id"] == "kb-1"
+    assert store.records[0].metadata["file_name"] == "rules.pdf"
+    assert store.records[0].metadata["file_type"] == "pdf"
+    assert store.records[0].metadata["source"] == "rules.pdf"
     assert store.records[0].metadata["embedding_model"] == "fake-embedding"
     assert all(record.embedding for record in store.records)
 
@@ -117,3 +138,35 @@ def test_document_service_rejects_pdf_without_extractable_text() -> None:
 
     with pytest.raises(EmptyDocumentError):
         service.process_pdf(valid_input())
+
+
+def test_document_service_processes_docx_without_fabricating_page_number() -> None:
+    store = RecordingVectorStore()
+    service = DocumentService(
+        extractor=FakeExtractor([]),
+        docx_extractor=FakeExtractor(
+            [DocumentPage(page_number=None, text="奖学金申请条件。")]
+        ),
+        cleaner=TextCleaner(),
+        chunk_service=BoundaryAwareChunkService(chunk_size=20, chunk_overlap=4),
+        embedding_service=FakeEmbeddingService(),
+        vector_store=store,
+        max_file_size_bytes=1024,
+    )
+
+    result = service.process_document(
+        DocumentInput(
+            document_id="doc-docx",
+            knowledge_base_id="kb-1",
+            file_name="handbook.docx",
+            content_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
+            content=b"PK-docx-content",
+        )
+    )
+
+    assert result.chunk_count == 1
+    assert store.records[0].metadata["file_type"] == "docx"
+    assert "page_number" not in store.records[0].metadata

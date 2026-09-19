@@ -12,7 +12,9 @@ from app.core.exceptions import (
     EmbeddingGenerationError,
     EmptyDocumentError,
     InvalidDocumentError,
+    InvalidRetrievalRequestError,
     OcrPageLimitExceededError,
+    RerankError,
     UnsupportedDocumentTypeError,
     VectorStoreOperationError,
 )
@@ -75,6 +77,19 @@ def register_exception_handlers(app: FastAPI) -> None:
             ),
         )
 
+    @app.exception_handler(InvalidRetrievalRequestError)
+    async def handle_invalid_retrieval_request(
+        request: Request, exception: InvalidRetrievalRequestError
+    ) -> JSONResponse:
+        return _json_error(
+            422,
+            ApiResponse.error(
+                "INVALID_RETRIEVAL_REQUEST",
+                str(exception),
+                _request_id(request),
+            ),
+        )
+
     @app.exception_handler(EmptyDocumentError)
     async def handle_empty_document(
         request: Request, exception: EmptyDocumentError
@@ -121,6 +136,20 @@ def register_exception_handlers(app: FastAPI) -> None:
             ApiResponse.error(
                 "VECTOR_STORE_UNAVAILABLE",
                 "Vector store is unavailable",
+                _request_id(request),
+            ),
+        )
+
+    @app.exception_handler(RerankError)
+    async def handle_rerank_failure(
+        request: Request, exception: RerankError
+    ) -> JSONResponse:
+        logger.exception("Rerank failed", exc_info=exception)
+        return _json_error(
+            503,
+            ApiResponse.error(
+                "RERANK_UNAVAILABLE",
+                "Rerank service is unavailable",
                 _request_id(request),
             ),
         )

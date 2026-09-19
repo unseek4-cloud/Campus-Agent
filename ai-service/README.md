@@ -1,6 +1,6 @@
 # CampusAgent AI Service
 
-当前包含 FastAPI 基础设施和第一阶段知识库文档处理能力：普通/扫描 PDF 文本提取、清洗、切块、Embedding 和 Chroma 向量持久化。扫描页通过 PaddleOCR 在本地完成中英文 OCR；检索、Rerank 和 LLM 不在本阶段范围内。
+当前包含完整的知识库入库与检索能力：普通/扫描 PDF 和 DOCX 文本提取、清洗、切块、Embedding、Chroma 向量持久化、TopK 相似度召回及本地 CrossEncoder 重排。扫描页通过 PaddleOCR 在本地完成中英文 OCR；本阶段不生成 LLM 最终回答。
 
 ## 启动
 
@@ -15,7 +15,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 所有业务 JSON 响应中的 `timestamp` 统一使用 UTC+8，并携带明确的 `+08:00` 偏移量。HTTP `Date` 响应头按协议规范继续使用 GMT。
 
-首次处理文档时，Sentence Transformers 会下载 `AI_EMBEDDING_MODEL_NAME` 指定的模型。首次遇到需要 OCR 的扫描页时，PaddleOCR 也会下载 OCR 模型。生产环境应提前缓存模型，并保证运行环境能访问模型下载源。
+首次处理文档时，Sentence Transformers 会下载 `AI_EMBEDDING_MODEL_NAME` 指定的模型。首次执行检索时会延迟加载 `AI_RERANK_MODEL_NAME` 指定的 CrossEncoder。首次遇到需要 OCR 的扫描页时，PaddleOCR 也会下载 OCR 模型。生产环境应提前缓存模型，并保证运行环境能访问模型下载源。
 
 ## 文档处理接口
 
@@ -25,7 +25,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 - `documentId`：Java 后端管理的文档 ID；
 - `knowledgeBaseId`：Java 后端管理的知识库 ID；
-- `file`：PDF 文件。
+- `file`：PDF 或 DOCX 文件。
 
 PowerShell 示例：
 
@@ -37,6 +37,54 @@ curl.exe -X POST http://localhost:8000/internal/v1/documents/process `
 ```
 
 Chroma 默认持久化到 `var/chroma`。该目录是运行时数据，不应提交到 Git。
+
+DOCX 会保留段落和表格文字顺序。DOCX 文件本身没有稳定的渲染页码，因此其
+chunk metadata 和检索结果中的 `pageNumber` 为 `null`，不会伪造页码。
+
+## 知识库检索接口
+
+内部接口：`POST /internal/v1/knowledge/search`。
+
+```json
+{
+  "query": "国家奖学金申请需要满足什么条件？",
+  "topK": 5,
+  "knowledgeBaseId": "kb-001"
+}
+```
+
+`knowledgeBaseId` 可选；传入时只检索该知识库。开启 Rerank 时，时间类问题会在模型分数后
+核对日期证据的语义角色（例如“调查时间”和“截止时间”），按 `finalScore` 排序。
+其他问题仍按模型 `rerankScore` 排序。响应包含原始 cosine `score`、模型原始
+`rerankScore`、`evidenceScore`、`evidenceText`、`finalScore`、chunk 原文、
+文件名、文件类型、页码、`chunkIndex`、
+`documentId` 和来源。Chroma 使用 cosine 空间，接口将距离转换为
+`score = 1 - distance`；关闭 Rerank 时新增分数字段为 `null`。
+
+检索数据流：
+
+```text
+Query → Embedding → Chroma candidates (default 10)
+      → CrossEncoder Reranker → 时间证据校验 → final TopK (default 5)
+```
+
+PowerShell 示例：
+
+```powershell
+$body = @{ query = "国家奖学金申请需要满足什么条件？"; topK = 5 } |
+  ConvertTo-Json
+Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8000/internal/v1/knowledge/search `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+删除某个文档的全部向量：
+
+```powershell
+Invoke-RestMethod -Method Delete `
+  -Uri http://localhost:8000/internal/v1/documents/doc-001/vectors
+```
 
 ## PDF 与 OCR 处理流程
 
@@ -81,6 +129,47 @@ CPU 下 OCR 可能较慢，尤其是 300 DPI 的长文档。需要使用 NVIDIA 
 
 PaddleOCR 模型采用延迟初始化：FastAPI 启动、健康检查和处理普通文字 PDF 时都不会加载模型。第一次真正处理扫描页时下载和初始化可能需要较长时间。
 
+Embedding 模型同样采用延迟初始化。依赖装配使用进程内缓存，入库和检索共享同
+一个 Embedding 实例与 Chroma 实例，不会在每次上传或每次查询时重新加载模型。
+
+### Chunk、Embedding 与检索配置
+
+```dotenv
+AI_CHUNK_SIZE=800
+AI_CHUNK_OVERLAP=100
+AI_EMBEDDING_MODEL_NAME=BAAI/bge-small-zh-v1.5
+AI_EMBEDDING_DEVICE=cpu
+AI_EMBEDDING_BATCH_SIZE=32
+AI_VECTOR_STORE_PATH=var/chroma
+AI_VECTOR_STORE_COLLECTION=campus_documents
+AI_RETRIEVAL_DEFAULT_TOP_K=5
+AI_RETRIEVAL_MAX_TOP_K=20
+AI_RERANK_ENABLED=true
+AI_RERANK_MODEL_NAME=BAAI/bge-reranker-base
+AI_RERANK_DEVICE=cpu
+AI_RERANK_BATCH_SIZE=8
+AI_RERANK_MAX_LENGTH=512
+AI_RERANK_CANDIDATE_TOP_K=10
+AI_RERANK_TEMPORAL_EVIDENCE_ENABLED=true
+AI_RERANK_TEMPORAL_EVIDENCE_WEIGHT=0.35
+```
+
+修改 Embedding 模型后，旧向量与新查询向量不再属于同一向量空间，应删除并重新
+处理已有文档。修改 Chunk 参数也需要重新处理文档才能更新已有索引。
+
+Rerank 只作用于查询时的候选排序，修改 Rerank 模型或关闭
+`AI_RERANK_ENABLED` 不需要重新入库。`AI_RERANK_CANDIDATE_TOP_K`
+控制开启重排时 Chroma 的默认候选数；若请求 `topK` 更大，候选数会
+自动提升到请求值，以保证返回数量。
+时间证据校验仅作用于时间类问题，`evidenceScore` 为 `1` 时表示候选日期的角色
+与问法吻合，`-1` 表示“调查时间”与“截止时间”等角色冲突，`0.25` 表示有日期
+但没有明确时间标签，`0` 表示没有可用证据。
+`finalScore = rerankScore + AI_RERANK_TEMPORAL_EVIDENCE_WEIGHT × evidenceScore`；
+`rerankScore` 始终保留模型原值。`evidenceText` 是来源 chunk 的原文摘录，不是 LLM 生成答案。
+只有候选中出现明确的同类时间证据（`evidenceScore = 1`）时才启用证据加权；
+否则保持模型原排序，但仍返回发现的冲突证据供检查。
+关闭 `AI_RERANK_TEMPORAL_EVIDENCE_ENABLED` 可恢复纯模型重排。
+
 ## 模块边界
 
 - `app/services/document_service.py`：仅编排处理流程；
@@ -89,6 +178,10 @@ PaddleOCR 模型采用延迟初始化：FastAPI 启动、健康检查和处理�
 - `app/services/pdf_page_renderer.py`：PDF 页面渲染抽象；
 - `app/services/chunk_service.py`：可替换的切块策略；
 - `app/services/embedding_service.py`：模型无关的 Embedding 抽象；
+- `app/services/rerank_service.py`：模型无关的 Rerank 抽象；
+- `app/services/temporal_evidence_service.py`：从候选原文核对时间证据；
+- `app/services/evidence_aware_rerank_service.py`：组合模型分数与时间证据；
+- `app/services/retrieval_service.py`：只编排 query embedding、候选召回与独立重排服务；
 - `app/vector_store/base.py`：向量存储抽象；
 - `app/infrastructure/`、`app/vector_store/chroma_store.py`：第三方库适配器；
 - `app/core/dependencies.py`：集中组装具体实现。
@@ -101,3 +194,27 @@ PaddleOCR 模型采用延迟初始化：FastAPI 启动、健康检查和处理�
 python -m pip install -r requirements-dev.txt
 python -m pytest
 ```
+
+只运行“心理测评时间”重排回归测试：
+
+```bash
+python -m pytest tests/unit/test_retrieval_service.py \
+  -k psychological_assessment_time
+python -m pytest tests/unit/test_temporal_evidence_rerank.py
+```
+
+服务启动且目标文档已入库后，可用真实模型验收：
+
+```powershell
+$body = @{ query = "心理测评的时间是什么时候？"; topK = 5 } |
+  ConvertTo-Json
+Invoke-RestMethod -Method Post `
+  -Uri http://localhost:8000/internal/v1/knowledge/search `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+验收时检查 `results[0]`：内容应包含 `2026年9月19日—22日`，
+`pageNumber` 应为 `1`，`evidenceText` 应定位到“调查时间”和日期，
+`score` 与 `rerankScore` 分别保留原始 cosine 与模型分数，最终顺序由
+`finalScore` 决定。若问“心理测评截止时间是什么时候？”，则应由 page 4 排第一。

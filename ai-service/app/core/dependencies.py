@@ -2,15 +2,24 @@ from functools import lru_cache
 from pathlib import Path
 
 from app.core.config import get_settings
+from app.infrastructure.docx.docx_extractor import DocxDocumentExtractor
 from app.infrastructure.embeddings.sentence_transformer_embedding import (
     SentenceTransformerEmbeddingService,
 )
 from app.infrastructure.ocr.paddle_ocr_service import PaddleOcrService
 from app.infrastructure.pdf.pdfium_page_renderer import PdfiumPageRenderer
 from app.infrastructure.pdf.pypdf_extractor import PypdfDocumentExtractor
+from app.infrastructure.rerankers.sentence_transformer_reranker import (
+    SentenceTransformerRerankService,
+)
 from app.services.chunk_service import BoundaryAwareChunkService
 from app.services.document_service import DocumentService
+from app.services.embedding_service import EmbeddingService
+from app.services.evidence_aware_rerank_service import EvidenceAwareRerankService
 from app.services.ocr_fallback_document_extractor import OcrFallbackDocumentExtractor
+from app.services.rerank_service import RerankService
+from app.services.retrieval_service import RetrievalService
+from app.services.temporal_evidence_service import TemporalEvidenceService
 from app.services.text_cleaner import TextCleaner
 from app.vector_store.chroma_store import ChromaVectorStore
 
@@ -18,13 +27,52 @@ _AI_SERVICE_ROOT = Path(__file__).resolve().parents[2]
 
 
 @lru_cache
-def get_document_service() -> DocumentService:
-    """Composition root: the only place binding ports to concrete adapters."""
+def get_embedding_service() -> EmbeddingService:
+    settings = get_settings()
+    return SentenceTransformerEmbeddingService(
+        model_name=settings.embedding_model_name,
+        device=settings.embedding_device,
+        batch_size=settings.embedding_batch_size,
+    )
+
+
+@lru_cache
+def get_vector_store() -> ChromaVectorStore:
     settings = get_settings()
     vector_store_path = Path(settings.vector_store_path)
     if not vector_store_path.is_absolute():
         vector_store_path = _AI_SERVICE_ROOT / vector_store_path
+    return ChromaVectorStore(
+        path=vector_store_path,
+        collection_name=settings.vector_store_collection,
+        batch_size=settings.vector_store_batch_size,
+    )
 
+
+@lru_cache
+def get_rerank_service() -> RerankService | None:
+    settings = get_settings()
+    if not settings.rerank_enabled:
+        return None
+    base_reranker = SentenceTransformerRerankService(
+        model_name=settings.rerank_model_name,
+        device=settings.rerank_device,
+        batch_size=settings.rerank_batch_size,
+        max_length=settings.rerank_max_length,
+    )
+    if not settings.rerank_temporal_evidence_enabled:
+        return base_reranker
+    return EvidenceAwareRerankService(
+        base_reranker=base_reranker,
+        temporal_evidence=TemporalEvidenceService(),
+        evidence_weight=settings.rerank_temporal_evidence_weight,
+    )
+
+
+@lru_cache
+def get_document_service() -> DocumentService:
+    """Composition root: the only place binding ports to concrete adapters."""
+    settings = get_settings()
     cleaner = TextCleaner()
     extractor = OcrFallbackDocumentExtractor(
         text_extractor=PypdfDocumentExtractor(),
@@ -39,24 +87,27 @@ def get_document_service() -> DocumentService:
         dpi=settings.ocr_dpi,
         max_ocr_pages_per_document=settings.ocr_max_pages_per_document,
     )
-    embedding_service = SentenceTransformerEmbeddingService(
-        model_name=settings.embedding_model_name,
-        device=settings.embedding_device,
-        batch_size=settings.embedding_batch_size,
-    )
-    vector_store = ChromaVectorStore(
-        path=vector_store_path,
-        collection_name=settings.vector_store_collection,
-        batch_size=settings.vector_store_batch_size,
-    )
     return DocumentService(
         extractor=extractor,
+        docx_extractor=DocxDocumentExtractor(),
         cleaner=cleaner,
         chunk_service=BoundaryAwareChunkService(
             chunk_size=settings.chunk_size,
             chunk_overlap=settings.chunk_overlap,
         ),
-        embedding_service=embedding_service,
-        vector_store=vector_store,
+        embedding_service=get_embedding_service(),
+        vector_store=get_vector_store(),
         max_file_size_bytes=settings.max_pdf_size_mb * 1024 * 1024,
+    )
+
+
+@lru_cache
+def get_retrieval_service() -> RetrievalService:
+    settings = get_settings()
+    return RetrievalService(
+        embedding_service=get_embedding_service(),
+        vector_store=get_vector_store(),
+        max_top_k=settings.retrieval_max_top_k,
+        rerank_service=get_rerank_service(),
+        candidate_top_k=settings.rerank_candidate_top_k,
     )

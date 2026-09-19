@@ -51,7 +51,8 @@ mvn clean package
 java -jar campus-app/target/campus-app-0.1.0-SNAPSHOT.jar
 ```
 
-健康检查：`http://localhost:8080/api/v1/health`。
+健康检查：`http://localhost:8080/api/v1/health`。Java 后端通过
+`AI_SERVICE_BASE_URL`（默认 `http://localhost:8000`）访问 Python AI 服务。
 
 ## 启动 AI 服务
 
@@ -79,9 +80,36 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 健康检查：`http://localhost:8000/internal/v1/health`，OpenAPI 文档：`http://localhost:8000/docs`。
 
+首次处理文档时会下载并加载 Embedding 模型，首次检索时会加载 Rerank
+模型，首次处理扫描页时会下载并加载 PaddleOCR 模型。这些模型在同一 AI 服务
+进程内都只初始化一次。
+
+## RAG 检索开发链路
+
+```text
+PDF / DOCX
+  → 文本提取（PDF 无文本页才执行 OCR）
+  → 按页、段落和句子边界切块
+  → Sentence Transformers Embedding
+  → Chroma 持久化
+  → 查询 Embedding
+  → 余弦相似度候选召回
+  → 本地 CrossEncoder Rerank
+  → 时间类问题的日期证据校验
+  → Java API
+  → 前端检索测试页
+```
+
+检索公共接口：`POST http://localhost:8080/api/knowledge/search`。
+
+前端测试页：`http://localhost:5173/knowledge/search`。
+
+文档处理、删除向量和 AI 内部检索接口的调用示例见
+[`ai-service/README.md`](ai-service/README.md)。
+
 ## 当前边界
 
 - 浏览器只访问 Java 后端，不直接访问 AI 服务。
 - Java 后端负责业务、权限和 MySQL 数据。
-- Python 服务只承载 AI 能力；当前仅提供基础配置和健康检查。
+- Python 服务只承载文档解析、OCR、Embedding、向量存储和检索等 AI 能力。
 - 业务模块只能通过公开契约协作，禁止跨模块访问 Mapper、Entity 或数据表。

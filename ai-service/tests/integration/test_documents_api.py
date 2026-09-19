@@ -9,7 +9,7 @@ from app.main import app
 
 
 class SuccessfulDocumentService:
-    def process_pdf(self, document: DocumentInput) -> DocumentProcessingResult:
+    def process_document(self, document: DocumentInput) -> DocumentProcessingResult:
         return DocumentProcessingResult(
             document_id=document.document_id,
             knowledge_base_id=document.knowledge_base_id,
@@ -22,13 +22,19 @@ class SuccessfulDocumentService:
 
 
 class EmptyDocumentService:
-    def process_pdf(self, document: DocumentInput) -> DocumentProcessingResult:
+    def process_document(self, document: DocumentInput) -> DocumentProcessingResult:
         raise EmptyDocumentError("PDF contains no extractable text")
 
 
 class OcrLimitDocumentService:
-    def process_pdf(self, document: DocumentInput) -> DocumentProcessingResult:
+    def process_document(self, document: DocumentInput) -> DocumentProcessingResult:
         raise OcrPageLimitExceededError("PDF requires OCR for too many pages")
+
+
+class DeletingDocumentService:
+    def delete_document_vectors(self, document_id: str) -> int:
+        assert document_id == "doc-1"
+        return 7
 
 
 def test_process_document_returns_unified_success_response() -> None:
@@ -86,3 +92,18 @@ def test_process_document_maps_ocr_page_limit_error() -> None:
 
     assert response.status_code == 422
     assert response.json()["code"] == "OCR_PAGE_LIMIT_EXCEEDED"
+
+
+def test_delete_document_vectors_returns_deleted_count() -> None:
+    app.dependency_overrides[get_document_service] = DeletingDocumentService
+    try:
+        with TestClient(app) as client:
+            response = client.delete("/internal/v1/documents/doc-1/vectors")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "documentId": "doc-1",
+        "deletedVectorCount": 7,
+    }

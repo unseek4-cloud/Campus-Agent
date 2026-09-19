@@ -3,6 +3,25 @@
     <modelVersion>4.0.0</modelVersion>
     <parent><groupId>com.campusagent</groupId><artifactId>campus-backend</artifactId><version>0.1.0-SNAPSHOT</version></parent>
     <artifactId>campus-ai-integration</artifactId>
-    <dependencies><dependency><groupId>com.campusagent</groupId><artifactId>campus-shared</artifactId><version>${project.version}</version></dependency></dependencies>
+    <dependencies>
+        <dependency>
+            <groupId>com.campusagent</groupId>
+            <artifactId>campus-shared</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>
-

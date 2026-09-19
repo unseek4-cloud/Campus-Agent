@@ -26,6 +26,19 @@ def test_chunker_uses_exact_overlap_when_no_boundary_exists() -> None:
     assert [chunk.text for chunk in chunks] == ["abcdefghij", "hijklmnop"]
 
 
+def test_chunker_starts_overlap_at_sentence_boundary_when_available() -> None:
+    chunker = BoundaryAwareChunkService(chunk_size=8, chunk_overlap=3)
+
+    chunks = chunker.split(
+        [DocumentPage(page_number=1, text="第一句。第二句。第三句。")]
+    )
+
+    assert [chunk.text for chunk in chunks] == [
+        "第一句。第二句。",
+        "第二句。第三句。",
+    ]
+
+
 @pytest.mark.parametrize(
     ("chunk_size", "chunk_overlap"),
     [(0, 0), (10, -1), (10, 10), (10, 11)],
