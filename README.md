@@ -1,6 +1,8 @@
 # CampusAgent
 
-CampusAgent 是面向高校学生的事务智能问答与办事引导系统。本仓库当前仅包含可独立启动的基础骨架，不包含具体业务实现。
+CampusAgent 是面向高校学生的事务智能问答与办事引导系统。本仓库包含文档知识库检索和 RAG 智能问答链路。
+
+本项目目前由AIC  海底小纵队 队伍负责开发与维护
 
 ## 项目结构
 
@@ -96,13 +98,18 @@ PDF / DOCX
   → 余弦相似度候选召回
   → 本地 CrossEncoder Rerank
   → 时间类问题的日期证据校验
+  → Rerank 分数过滤与 Context Builder
+  → 千问 OpenAI Compatible API
   → Java API
-  → 前端检索测试页
+  → 前端答案和引用来源
 ```
 
 检索公共接口：`POST http://localhost:8080/api/knowledge/search`。
+问答公共接口：`POST http://localhost:8080/api/rag/chat`。
 
-前端测试页：`http://localhost:5173/knowledge/search`。
+前端问答页：`http://localhost:5173/knowledge/search`，原始检索结果在“检索调试”区域。
+
+在 `ai-service/.env` 填入 `AI_QWEN_API_KEY` 后即可使用问答。千问模型、地址、超时和 Context 过滤参数见 [`ai-service/README.md`](ai-service/README.md)。
 
 文档处理、删除向量和 AI 内部检索接口的调用示例见
 [`ai-service/README.md`](ai-service/README.md)。

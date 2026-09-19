@@ -52,3 +52,15 @@ class RerankError(Exception):
 
 class InvalidRetrievalRequestError(Exception):
     """The retrieval request is syntactically valid but violates service limits."""
+
+
+class LlmConfigurationError(Exception):
+    """LLM provider configuration is missing or unsupported."""
+
+
+class LlmTimeoutError(Exception):
+    """The LLM provider did not respond before the configured timeout."""
+
+
+class LlmProviderError(Exception):
+    """The LLM provider returned an error or invalid response."""

@@ -1,6 +1,6 @@
 # CampusAgent AI Service
 
-当前包含完整的知识库入库与检索能力：普通/扫描 PDF 和 DOCX 文本提取、清洗、切块、Embedding、Chroma 向量持久化、TopK 相似度召回及本地 CrossEncoder 重排。扫描页通过 PaddleOCR 在本地完成中英文 OCR；本阶段不生成 LLM 最终回答。
+包含知识库入库、检索和 RAG 问答能力：普通/扫描 PDF 和 DOCX 文本提取、清洗、切块、Embedding、Chroma 向量持久化、TopK 相似度召回、本地 CrossEncoder 重排和千问答案生成。扫描页通过 PaddleOCR 在本地完成中英文 OCR。
 
 ## 启动
 
@@ -84,6 +84,48 @@ Invoke-RestMethod -Method Post `
 ```powershell
 Invoke-RestMethod -Method Delete `
   -Uri http://localhost:8000/internal/v1/documents/doc-001/vectors
+```
+
+## RAG 问答接口与配置
+
+内部接口：`POST /internal/v1/rag/chat`。旧检索接口仍可单独调用。
+
+```json
+{"query":"2026级新生心理测评时间是什么时候？","knowledgeBaseId":"kb-001"}
+```
+
+`knowledgeBaseId` 可省略。响应沿用 `code/message/data/requestId/timestamp` 包装；`data` 包含 `answer`、`sources`、`retrievalCount`、`rerankCount`、`usedContextCount`。来源只取实际送入模型的片段，`content` 是送入模型的实际文字；前端以已有的 `documentId:chunkIndex` 显示 Chunk ID。
+
+处理流程：候选召回 → 现有 Rerank 和时间证据排序 → 原始模型分数过滤 → 最多 3 个 Chunk → 去重和长度限制 → 千问 OpenAI Compatible `/chat/completions` → 答案与来源。日期证据角色明确冲突的片段不会进入 Context。没有片段达到阈值时直接返回“根据当前知识库暂未找到相关信息。”，不调用千问。
+
+在 `ai-service/.env` 中配置（先复制 `.env.example`）：
+
+```dotenv
+AI_LLM_PROVIDER=qwen
+AI_QWEN_API_KEY=你的百炼 API Key
+AI_QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+AI_QWEN_MODEL=qwen-plus
+AI_LLM_TIMEOUT_SECONDS=30
+AI_LLM_TEMPERATURE=0.2
+AI_LLM_MAX_TOKENS=1000
+AI_RAG_RETRIEVAL_TOP_K=10
+AI_RAG_CONTEXT_TOP_K=3
+AI_RAG_MIN_RERANK_SCORE=0.015
+AI_RAG_MIN_RELATIVE_SCORE=0.4
+AI_RAG_MAX_CONTEXT_CHARS=6000
+```
+
+`.env` 已被 Git 忽略。没有 API Key 时，检索仍可用；有 Context 的 RAG 请求返回 `LLM_NOT_CONFIGURED`。超时返回 `LLM_TIMEOUT`，上游报错或空内容返回 `LLM_REQUEST_FAILED`。Python 不可用时，Java 返回 `AI_SERVICE_UNAVAILABLE`。
+
+`AI_QWEN_BASE_URL` 默认示例适用于北京地域的兼容接口。其他地域或业务空间专属域名请按[阿里云百炼 OpenAI 兼容接口文档](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)填写，Key 与地域需匹配。
+
+`AI_RAG_MIN_RERANK_SCORE` 是 **CrossEncoder 原始分数**，不是百分比；`finalScore` 只决定排序。`AI_RAG_MIN_RELATIVE_SCORE` 要求候选原始分数至少达到本次最高分的相应比例（仅当最高分大于 0 时应用）。分数范围随模型和资料变化。对当前本地索引做离线抽样：时间问题正确片段约 `0.994`，无关片段约 `0.065`；对象问题相关通知片段约 `0.018`；一个未知问题最高约 `0.014`。因此默认绝对阈值 `0.015`、相对比例 `0.4` 只是当前资料的初值，不能保证其他未知问题均被拦截。先用旧 `/knowledge/search` 接口测试可回答和不可回答的问题，查看 `rerankScore` 分布，再调整阈值：误拒有效片段则降低，无关片段进入 Context 则提高。关闭 `AI_RERANK_ENABLED` 时没有 `rerankScore`，RAG 会拒绝全部片段以避免无依据回答。
+
+PowerShell 调用示例：
+
+```powershell
+$body = @{ query = "2026级新生心理测评时间是什么时候？" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/internal/v1/rag/chat -ContentType "application/json" -Body $body
 ```
 
 ## PDF 与 OCR 处理流程
@@ -182,6 +224,10 @@ Rerank 只作用于查询时的候选排序，修改 Rerank 模型或关闭
 - `app/services/temporal_evidence_service.py`：从候选原文核对时间证据；
 - `app/services/evidence_aware_rerank_service.py`：组合模型分数与时间证据；
 - `app/services/retrieval_service.py`：只编排 query embedding、候选召回与独立重排服务；
+- `app/services/result_filter.py`：根据原始 Rerank 分数筛选 Chunk；
+- `app/services/context_builder.py`：去重、截断并保留实际引用来源；
+- `app/services/rag_service.py`：编排检索、过滤、Context 与 LLM；
+- `app/llm/`：模型 Provider 抽象、千问适配器、工厂和 Prompt；
 - `app/vector_store/base.py`：向量存储抽象；
 - `app/infrastructure/`、`app/vector_store/chroma_store.py`：第三方库适配器；
 - `app/core/dependencies.py`：集中组装具体实现。
@@ -218,3 +264,14 @@ Invoke-RestMethod -Method Post `
 `pageNumber` 应为 `1`，`evidenceText` 应定位到“调查时间”和日期，
 `score` 与 `rerankScore` 分别保留原始 cosine 与模型分数，最终顺序由
 `finalScore` 决定。若问“心理测评截止时间是什么时候？”，则应由 page 4 排第一。
+
+### RAG 验收问题
+
+目标心理测评通知入库后，依次向 Java 的 `POST /api/rag/chat` 或本服务的 `POST /internal/v1/rag/chat` 提问：
+
+1. `2026级新生心理测评时间是什么时候？`：当前本地通知应只回答通知中的调查时间 `2026年9月19日—22日`，不要附带对象、登录方式、电话；
+2. `心理测评对象是谁？`：只回答通知中列出的对象，核对引用文字，避免把截图界面当成对象来源；
+3. `心理测评在哪里进行？`：只根据通知中的地点或平台信息回答，不推断通知未写出的实体地点；
+4. `校园火星基地怎么申请？`：当前本地知识库应返回固定的“根据当前知识库暂未找到相关信息。”，`sources` 为空、`usedContextCount` 为 0。
+
+衡量无关回答是否改善：同时用旧检索 API 查看同一问题的 Top 10，再检查 RAG 的 `usedContextCount` 和 `sources`。当前本地索引中，时间问题从 10 个重排候选缩减到 1 个上下文片段；对象和地点各缩减到 3 个。最终答案只应包含所问字段。LLM 答案的语义质量仍需配置真实千问 Key 后人工复核；自动测试使用替身 Provider，不会消费 API 额度。

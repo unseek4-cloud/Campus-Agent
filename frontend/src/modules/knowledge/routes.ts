@@ -6,7 +6,7 @@ export const knowledgeRoutes: RouteRecordRaw[] = [
     name: 'knowledge-search',
     component: () => import('./pages/KnowledgeSearchPage.vue'),
     meta: {
-      title: '知识库检索测试',
+      title: '校园事务智能问答',
     },
   },
 ]

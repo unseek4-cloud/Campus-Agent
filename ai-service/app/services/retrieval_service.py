@@ -1,8 +1,17 @@
+from dataclasses import dataclass
+
 from app.core.exceptions import InvalidRetrievalRequestError
 from app.domain.document import VectorSearchResult
 from app.services.embedding_service import EmbeddingService
 from app.services.rerank_service import RerankService
 from app.vector_store.base import VectorStore
+
+
+@dataclass(frozen=True)
+class RetrievalRun:
+    results: list[VectorSearchResult]
+    retrieval_count: int
+    rerank_count: int
 
 
 class RetrievalService:
@@ -32,6 +41,14 @@ class RetrievalService:
         top_k: int,
         knowledge_base_id: str | None = None,
     ) -> list[VectorSearchResult]:
+        return self.search_with_counts(query, top_k, knowledge_base_id).results
+
+    def search_with_counts(
+        self,
+        query: str,
+        top_k: int,
+        knowledge_base_id: str | None = None,
+    ) -> RetrievalRun:
         normalized_query = query.strip()
         if not normalized_query:
             raise InvalidRetrievalRequestError("query must not be blank")
@@ -52,9 +69,10 @@ class RetrievalService:
             knowledge_base_id=(knowledge_base_id or "").strip() or None,
         )
         if self._rerank_service is None:
-            return candidates
-        return self._rerank_service.rerank(
+            return RetrievalRun(candidates, len(candidates), 0)
+        results = self._rerank_service.rerank(
             query=normalized_query,
             candidates=candidates,
             top_k=top_k,
         )
+        return RetrievalRun(results, len(candidates), len(results))

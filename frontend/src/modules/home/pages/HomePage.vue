@@ -23,7 +23,7 @@
       <el-divider />
 
       <router-link to="/knowledge/search">
-        <el-button type="primary">打开知识库检索测试</el-button>
+        <el-button type="primary">开始提问</el-button>
       </router-link>
     </el-card>
   </main>

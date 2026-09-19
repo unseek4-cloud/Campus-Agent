@@ -46,6 +46,20 @@ class Settings(BaseSettings):
     rerank_temporal_evidence_enabled: bool = True
     rerank_temporal_evidence_weight: float = Field(default=0.35, ge=0, le=1)
 
+    rag_retrieval_top_k: int = Field(default=10, ge=1, le=100)
+    rag_context_top_k: int = Field(default=3, ge=1, le=20)
+    rag_min_rerank_score: float = 0.015
+    rag_min_relative_score: float = Field(default=0.4, ge=0, le=1)
+    rag_max_context_chars: int = Field(default=6000, ge=500, le=50000)
+
+    llm_provider: str = "qwen"
+    qwen_api_key: str = ""
+    qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    qwen_model: str = "qwen-plus"
+    llm_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    llm_temperature: float = Field(default=0.2, ge=0, le=2)
+    llm_max_tokens: int = Field(default=1000, ge=1, le=8192)
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -61,6 +75,10 @@ class Settings(BaseSettings):
             raise ValueError(
                 "retrieval_default_top_k must not exceed retrieval_max_top_k"
             )
+        if self.rag_retrieval_top_k > self.retrieval_max_top_k:
+            raise ValueError("rag_retrieval_top_k must not exceed retrieval_max_top_k")
+        if self.rag_context_top_k > self.rag_retrieval_top_k:
+            raise ValueError("rag_context_top_k must not exceed rag_retrieval_top_k")
         return self
 
     @field_validator("ocr_language")

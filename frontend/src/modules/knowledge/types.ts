@@ -33,3 +33,26 @@ export interface KnowledgeSearchResponse {
   query: string
   results: KnowledgeSearchResult[]
 }
+
+export interface RagChatRequest {
+  query: string
+  knowledgeBaseId?: string
+}
+
+export interface RagSource {
+  documentId: string
+  fileName: string
+  chunkIndex: number
+  pageNumber: number | null
+  score: number
+  rerankScore: number
+  content: string
+}
+
+export interface RagChatResponse {
+  answer: string
+  sources: RagSource[]
+  retrievalCount: number
+  rerankCount: number
+  usedContextCount: number
+}

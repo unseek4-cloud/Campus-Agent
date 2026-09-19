@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from app.core.config import get_settings
+from app.llm.llm_factory import create_llm_provider
 from app.infrastructure.docx.docx_extractor import DocxDocumentExtractor
 from app.infrastructure.embeddings.sentence_transformer_embedding import (
     SentenceTransformerEmbeddingService,
@@ -19,6 +20,9 @@ from app.services.evidence_aware_rerank_service import EvidenceAwareRerankServic
 from app.services.ocr_fallback_document_extractor import OcrFallbackDocumentExtractor
 from app.services.rerank_service import RerankService
 from app.services.retrieval_service import RetrievalService
+from app.services.context_builder import ContextBuilder
+from app.services.rag_service import RagService
+from app.services.result_filter import RerankResultFilter
 from app.services.temporal_evidence_service import TemporalEvidenceService
 from app.services.text_cleaner import TextCleaner
 from app.vector_store.chroma_store import ChromaVectorStore
@@ -110,4 +114,20 @@ def get_retrieval_service() -> RetrievalService:
         max_top_k=settings.retrieval_max_top_k,
         rerank_service=get_rerank_service(),
         candidate_top_k=settings.rerank_candidate_top_k,
+    )
+
+
+@lru_cache
+def get_rag_service() -> RagService:
+    settings = get_settings()
+    return RagService(
+        retrieval=get_retrieval_service(),
+        result_filter=RerankResultFilter(
+            min_rerank_score=settings.rag_min_rerank_score,
+            top_k=settings.rag_context_top_k,
+            min_relative_score=settings.rag_min_relative_score,
+        ),
+        context_builder=ContextBuilder(settings.rag_max_context_chars),
+        llm=create_llm_provider(settings),
+        retrieval_top_k=settings.rag_retrieval_top_k,
     )

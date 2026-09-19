@@ -3,14 +3,16 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { computed, ref } from 'vue'
 
-import { searchKnowledge } from '../api'
-import type { ApiResponse, KnowledgeSearchResult } from '../types'
+import { chatWithKnowledge, searchKnowledge } from '../api'
+import type { ApiResponse, KnowledgeSearchResult, RagChatResponse } from '../types'
 
 const query = ref('')
 const topK = ref(5)
 const loading = ref(false)
 const searched = ref(false)
 const results = ref<KnowledgeSearchResult[]>([])
+const answer = ref<RagChatResponse | null>(null)
+const askedQuestion = ref('')
 
 const topKOptions = [1, 3, 5, 10, 20]
 const canSearch = computed(() => query.value.trim().length > 0 && !loading.value)
@@ -23,7 +25,7 @@ function errorMessage(error: unknown): string {
   if (axios.isAxiosError<ApiResponse<null>>(error)) {
     return error.response?.data?.message ?? error.message
   }
-  return error instanceof Error ? error.message : '检索失败，请检查服务日志'
+  return error instanceof Error ? error.message : '请求失败，请检查服务日志'
 }
 
 async function handleSearch(): Promise<void> {
@@ -49,6 +51,24 @@ async function handleSearch(): Promise<void> {
     loading.value = false
   }
 }
+
+async function handleChat(): Promise<void> {
+  const normalizedQuery = query.value.trim()
+  if (!normalizedQuery) {
+    ElMessage.warning('请输入问题')
+    return
+  }
+  loading.value = true
+  answer.value = null
+  askedQuestion.value = normalizedQuery
+  try {
+    answer.value = await chatWithKnowledge({ query: normalizedQuery })
+  } catch (error) {
+    ElMessage.error(errorMessage(error))
+  } finally {
+    loading.value = false
+  }
+}
 </script>
 
 <template>
@@ -56,9 +76,9 @@ async function handleSearch(): Promise<void> {
     <section class="search-shell">
       <header class="page-header">
         <div>
-          <el-tag effect="plain">开发工具</el-tag>
-          <h1>知识库检索测试</h1>
-          <p>查看向量召回与 Rerank 结果，用于评估检索排序效果。</p>
+          <el-tag effect="plain">CampusAgent</el-tag>
+          <h1>校园事务智能问答</h1>
+          <p>提出问题，查看简洁答案及其知识库来源。</p>
         </div>
         <router-link to="/">
           <el-button>返回首页</el-button>
@@ -66,7 +86,7 @@ async function handleSearch(): Promise<void> {
       </header>
 
       <el-card shadow="never" class="search-card">
-        <el-form label-position="top" @submit.prevent="handleSearch">
+        <el-form label-position="top" @submit.prevent="handleChat">
           <el-form-item label="问题">
             <el-input
               v-model="query"
@@ -75,33 +95,57 @@ async function handleSearch(): Promise<void> {
               maxlength="4000"
               show-word-limit
               placeholder="例如：国家奖学金申请需要满足什么条件？"
-              @keydown.ctrl.enter="handleSearch"
+              @keydown.ctrl.enter="handleChat"
             />
           </el-form-item>
 
           <div class="search-actions">
-            <el-form-item label="TopK" class="top-k-field">
-              <el-select v-model="topK" aria-label="TopK">
-                <el-option
-                  v-for="option in topKOptions"
-                  :key="option"
-                  :label="option"
-                  :value="option"
-                />
-              </el-select>
-            </el-form-item>
             <el-button
               type="primary"
               size="large"
               :disabled="!canSearch"
               :loading="loading"
-              @click="handleSearch"
+              @click="handleChat"
             >
-              搜索知识库
+              获取 AI 回答
             </el-button>
           </div>
         </el-form>
       </el-card>
+
+      <section v-if="answer" class="answer-section" aria-live="polite">
+        <el-card shadow="never" class="answer-card">
+          <div class="question-label">你的问题</div>
+          <p class="asked-question">{{ askedQuestion }}</p>
+          <el-divider />
+          <h2>CampusAgent</h2>
+          <p class="answer-text">{{ answer.answer }}</p>
+        </el-card>
+        <el-card v-if="answer.sources.length" shadow="never" class="sources-card">
+          <h2>参考来源</h2>
+          <div v-for="source in answer.sources" :key="`${source.documentId}:${source.chunkIndex}`" class="source-item">
+            <strong>{{ source.fileName || source.documentId }}</strong>
+            <details>
+              <summary>查看引用内容</summary>
+              <dl class="source-details">
+                <div><dt>文档</dt><dd>{{ source.fileName }}</dd></div>
+                <div><dt>Chunk ID</dt><dd>{{ source.documentId }}:{{ source.chunkIndex }}</dd></div>
+                <div><dt>Rerank Score</dt><dd>{{ scoreText(source.rerankScore) }}</dd></div>
+              </dl>
+              <div class="chunk-content">{{ source.content }}</div>
+            </details>
+          </div>
+        </el-card>
+      </section>
+
+      <details class="debug-section">
+        <summary>检索调试（原始 Chunk）</summary>
+        <div class="debug-actions">
+          <el-select v-model="topK" aria-label="调试 TopK" class="top-k-field">
+            <el-option v-for="option in topKOptions" :key="option" :label="option" :value="option" />
+          </el-select>
+          <el-button :disabled="!canSearch" :loading="loading" @click="handleSearch">运行检索</el-button>
+        </div>
 
       <section v-if="searched" class="results-section" aria-live="polite">
         <div class="results-heading">
@@ -161,6 +205,7 @@ async function handleSearch(): Promise<void> {
           <div class="chunk-content">{{ result.content }}</div>
         </el-card>
       </section>
+      </details>
     </section>
   </main>
 </template>
@@ -227,6 +272,20 @@ async function handleSearch(): Promise<void> {
   gap: 16px;
   margin-top: 32px;
 }
+
+.answer-section { display: grid; gap: 16px; margin-top: 24px; }
+.answer-card h2, .sources-card h2 { margin: 0 0 12px; font-size: 20px; }
+.question-label { color: #909399; font-size: 14px; }
+.asked-question, .answer-text { white-space: pre-wrap; line-height: 1.8; }
+.answer-text { color: #303133; font-size: 18px; }
+.source-item { padding: 12px 0; border-top: 1px solid #e4e7ed; }
+.source-item summary, .debug-section summary { cursor: pointer; color: #409eff; margin-top: 8px; }
+.source-details { display: grid; gap: 8px; margin: 12px 0; }
+.source-details div { display: flex; gap: 8px; }
+.source-details dt { color: #909399; }
+.source-details dd { margin: 0; overflow-wrap: anywhere; }
+.debug-section { margin-top: 32px; }
+.debug-actions { display: flex; gap: 12px; margin-top: 16px; }
 
 .results-heading h2 {
   margin: 0;

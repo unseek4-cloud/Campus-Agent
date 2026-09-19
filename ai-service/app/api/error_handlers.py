@@ -13,6 +13,9 @@ from app.core.exceptions import (
     EmptyDocumentError,
     InvalidDocumentError,
     InvalidRetrievalRequestError,
+    LlmConfigurationError,
+    LlmProviderError,
+    LlmTimeoutError,
     OcrPageLimitExceededError,
     RerankError,
     UnsupportedDocumentTypeError,
@@ -153,6 +156,21 @@ def register_exception_handlers(app: FastAPI) -> None:
                 _request_id(request),
             ),
         )
+
+    @app.exception_handler(LlmConfigurationError)
+    async def handle_llm_configuration(request: Request, exception: LlmConfigurationError) -> JSONResponse:
+        logger.warning("LLM configuration unavailable: %s", exception)
+        return _json_error(503, ApiResponse.error("LLM_NOT_CONFIGURED", str(exception), _request_id(request)))
+
+    @app.exception_handler(LlmTimeoutError)
+    async def handle_llm_timeout(request: Request, exception: LlmTimeoutError) -> JSONResponse:
+        logger.warning("LLM request timed out")
+        return _json_error(504, ApiResponse.error("LLM_TIMEOUT", str(exception), _request_id(request)))
+
+    @app.exception_handler(LlmProviderError)
+    async def handle_llm_provider(request: Request, exception: LlmProviderError) -> JSONResponse:
+        logger.warning("LLM provider failed: %s", exception)
+        return _json_error(502, ApiResponse.error("LLM_REQUEST_FAILED", str(exception), _request_id(request)))
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_exception(
