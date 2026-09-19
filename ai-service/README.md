@@ -94,7 +94,21 @@ Invoke-RestMethod -Method Delete `
 {"query":"2026级新生心理测评时间是什么时候？","knowledgeBaseId":"kb-001"}
 ```
 
-`knowledgeBaseId` 可省略。响应沿用 `code/message/data/requestId/timestamp` 包装；`data` 包含 `answer`、`sources`、`retrievalCount`、`rerankCount`、`usedContextCount`。来源只取实际送入模型的片段，`content` 是送入模型的实际文字；前端以已有的 `documentId:chunkIndex` 显示 Chunk ID。
+`knowledgeBaseId` 可省略。响应沿用 `code/message/data/requestId/timestamp` 包装；`data` 包含 `answer`、`sources`、`retrievalCount`、`rerankCount`、`usedContextCount`、`rewrittenQuery`。来源只取实际送入模型的片段，`content` 是送入模型的实际文字；前端以已有的 `documentId:chunkIndex` 显示 Chunk ID。
+
+多轮请求可附带可选 `history`，每项只含 `role`（`user` / `assistant`）和 `content`。例如：
+
+```json
+{
+  "query": "对象是谁？",
+  "history": [
+    { "role": "user", "content": "2026级新生心理测评什么时候？" },
+    { "role": "assistant", "content": "2026年9月19日至22日。" }
+  ]
+}
+```
+
+这是无状态会话：浏览器维护历史，Java 校验后转发，Python 只取最近 `AI_CONVERSATION_MAX_MESSAGES` 条用于 Query Rewrite。改写器复用现有 LLM Provider；改写结果仅用于 Retrieval 和 Rerank。最终回答 Prompt 仍只含用户本轮原问题及本次知识库 Context，历史回答不作为事实来源，`sources` 仍只来自本次 Context。无历史时完全跳过改写；Provider 超时、异常、空值或异常格式时回退原问题并继续现有 RAG。`rewrittenQuery` 为调试字段，不含完整 Prompt。
 
 处理流程：候选召回 → 现有 Rerank 和时间证据排序 → 原始模型分数过滤 → 最多 3 个 Chunk → 去重和长度限制 → 千问 OpenAI Compatible `/chat/completions` → 答案与来源。日期证据角色明确冲突的片段不会进入 Context。没有片段达到阈值时直接返回“根据当前知识库暂未找到相关信息。”，不调用千问。
 
@@ -105,6 +119,7 @@ AI_LLM_PROVIDER=qwen
 AI_QWEN_API_KEY=你的百炼 API Key
 AI_QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 AI_QWEN_MODEL=qwen-plus
+AI_QWEN_TRUST_ENV=false
 AI_LLM_TIMEOUT_SECONDS=30
 AI_LLM_TEMPERATURE=0.2
 AI_LLM_MAX_TOKENS=1000
@@ -113,9 +128,14 @@ AI_RAG_CONTEXT_TOP_K=3
 AI_RAG_MIN_RERANK_SCORE=0.015
 AI_RAG_MIN_RELATIVE_SCORE=0.4
 AI_RAG_MAX_CONTEXT_CHARS=6000
+AI_CONVERSATION_MAX_MESSAGES=8
+AI_QUERY_REWRITE_ENABLED=true
+AI_QUERY_REWRITE_TEMPERATURE=0
 ```
 
 `.env` 已被 Git 忽略。没有 API Key 时，检索仍可用；有 Context 的 RAG 请求返回 `LLM_NOT_CONFIGURED`。超时返回 `LLM_TIMEOUT`，上游报错或空内容返回 `LLM_REQUEST_FAILED`。Python 不可用时，Java 返回 `AI_SERVICE_UNAVAILABLE`。
+
+`AI_QWEN_TRUST_ENV=false` 使千问 HTTP 客户端默认直连，避免 Windows 系统中失效的本地代理导致连接超时。若所在网络必须经环境变量或系统代理访问千问，可设置为 `true`，并先确认代理本身可连接。若看到 `Qwen API connection failed` 或 `Qwen request timed out`，先检查千问域名连通性和代理；若返回 `Qwen API returned HTTP 401/403`，再检查 Key、地域和权限。修改此配置后需重启 AI 服务。无需改动真实 `.env` 中已有的 Key。
 
 `AI_QWEN_BASE_URL` 默认示例适用于北京地域的兼容接口。其他地域或业务空间专属域名请按[阿里云百炼 OpenAI 兼容接口文档](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)填写，Key 与地域需匹配。
 

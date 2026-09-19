@@ -16,7 +16,7 @@ async def chat(
     rag_service: RagService = Depends(get_rag_service),
 ) -> ApiResponse[RagChatData]:
     result = await run_in_threadpool(
-        rag_service.answer, payload.query, payload.knowledge_base_id
+        rag_service.answer, payload.query, payload.knowledge_base_id, payload.history
     )
     sources = [
         RagSourceData(
@@ -41,6 +41,7 @@ async def chat(
             retrievalCount=result.retrieval_count,
             rerankCount=result.rerank_count,
             usedContextCount=len(sources),
+            rewrittenQuery=result.rewritten_query or payload.query,
         ),
         request.state.request_id,
     )

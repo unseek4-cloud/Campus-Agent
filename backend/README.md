@@ -33,3 +33,5 @@ java -jar campus-app/target/campus-app-0.1.0-SNAPSHOT.jar
 `POST /internal/v1/knowledge/search`，Python 内部地址不会暴露给前端。
 
 RAG 问答：`POST /api/rag/chat`，请求 `{"query":"心理测评时间是什么时候？"}`；可选 `knowledgeBaseId`。Java 只负责校验、转发和错误包装，千问 Key 配置在 Python AI 服务中。
+
+多轮问答可选传入 `history`，格式为 `[{"role":"user","content":"2026级新生心理测评什么时候？"},{"role":"assistant","content":"2026年9月19日至22日。"}]`。Java 将历史文本转发 Python；查询改写和历史截断在 Python 完成。旧请求不传 `history` 仍走单轮 RAG。响应增加 `rewrittenQuery` 供调试。

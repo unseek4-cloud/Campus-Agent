@@ -16,6 +16,7 @@ class QwenProvider(LlmProvider):
         temperature: float,
         max_tokens: int,
         client: httpx.Client | None = None,
+        trust_env: bool = False,
     ) -> None:
         self._api_key = api_key.strip()
         self._base_url = base_url.rstrip("/")
@@ -23,9 +24,12 @@ class QwenProvider(LlmProvider):
         self._timeout_seconds = timeout_seconds
         self._temperature = temperature
         self._max_tokens = max_tokens
-        self._client = client or httpx.Client()
+        # A stale OS proxy can prevent access even when DashScope is reachable directly.
+        self._client = client if client is not None else httpx.Client(trust_env=trust_env)
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
+    def generate(
+        self, system_prompt: str, user_prompt: str, *, temperature: float | None = None
+    ) -> str:
         if not self._api_key:
             raise LlmConfigurationError("Qwen API key is not configured (AI_QWEN_API_KEY)")
         if not self._base_url or not self._model:
@@ -40,7 +44,7 @@ class QwenProvider(LlmProvider):
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    "temperature": self._temperature,
+                    "temperature": self._temperature if temperature is None else temperature,
                     "max_tokens": self._max_tokens,
                 },
                 timeout=self._timeout_seconds,
@@ -57,5 +61,8 @@ class QwenProvider(LlmProvider):
             raise LlmProviderError(
                 f"Qwen API returned HTTP {exception.response.status_code}"
             ) from exception
-        except (httpx.RequestError, ValueError, KeyError, IndexError, TypeError) as exception:
+        except httpx.RequestError as exception:
+            raise LlmProviderError("Qwen API connection failed") from exception
+
+        except (ValueError, KeyError, IndexError, TypeError) as exception:
             raise LlmProviderError("Qwen API returned an invalid response") from exception

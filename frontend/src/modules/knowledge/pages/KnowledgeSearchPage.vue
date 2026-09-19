@@ -4,15 +4,22 @@ import { ElMessage } from 'element-plus'
 import { computed, ref } from 'vue'
 
 import { chatWithKnowledge, searchKnowledge } from '../api'
-import type { ApiResponse, KnowledgeSearchResult, RagChatResponse } from '../types'
+import type { ApiResponse, ConversationMessage, KnowledgeSearchResult, RagChatResponse } from '../types'
+
+interface ChatMessage extends ConversationMessage {
+  response?: RagChatResponse
+}
 
 const query = ref('')
 const topK = ref(5)
 const loading = ref(false)
 const searched = ref(false)
 const results = ref<KnowledgeSearchResult[]>([])
-const answer = ref<RagChatResponse | null>(null)
-const askedQuestion = ref('')
+const messages = ref<ChatMessage[]>([])
+const configuredHistoryLimit = Number(import.meta.env.VITE_CONVERSATION_MAX_MESSAGES ?? 8)
+const historyLimit = Number.isInteger(configuredHistoryLimit) && configuredHistoryLimit > 0
+  ? Math.min(configuredHistoryLimit, 100)
+  : 8
 
 const topKOptions = [1, 3, 5, 10, 20]
 const canSearch = computed(() => query.value.trim().length > 0 && !loading.value)
@@ -29,6 +36,7 @@ function errorMessage(error: unknown): string {
 }
 
 async function handleSearch(): Promise<void> {
+  if (loading.value) return
   const normalizedQuery = query.value.trim()
   if (!normalizedQuery) {
     ElMessage.warning('请输入要检索的问题')
@@ -53,21 +61,36 @@ async function handleSearch(): Promise<void> {
 }
 
 async function handleChat(): Promise<void> {
+  if (loading.value) return
   const normalizedQuery = query.value.trim()
   if (!normalizedQuery) {
     ElMessage.warning('请输入问题')
     return
   }
   loading.value = true
-  answer.value = null
-  askedQuestion.value = normalizedQuery
+  const history: ConversationMessage[] = messages.value.slice(-historyLimit).map(({ role, content }) => ({
+    role,
+    content,
+  }))
+  messages.value.push({ role: 'user', content: normalizedQuery })
+  query.value = ''
   try {
-    answer.value = await chatWithKnowledge({ query: normalizedQuery })
+    const response = await chatWithKnowledge({ query: normalizedQuery, history })
+    messages.value.push({ role: 'assistant', content: response.answer, response })
   } catch (error) {
+    messages.value.pop()
+    query.value = normalizedQuery
     ElMessage.error(errorMessage(error))
   } finally {
     loading.value = false
   }
+}
+
+function clearConversation(): void {
+  messages.value = []
+  query.value = ''
+  results.value = []
+  searched.value = false
 }
 </script>
 
@@ -84,6 +107,50 @@ async function handleChat(): Promise<void> {
           <el-button>返回首页</el-button>
         </router-link>
       </header>
+
+      <section class="conversation-section" aria-live="polite">
+        <div class="conversation-heading">
+          <h2>当前对话</h2>
+          <el-button :disabled="loading || messages.length === 0" @click="clearConversation">清空对话</el-button>
+        </div>
+        <el-empty v-if="messages.length === 0" description="输入第一个问题，开始对话" />
+        <article
+          v-for="(message, index) in messages"
+          :key="index"
+          class="chat-message"
+          :class="message.role === 'user' ? 'user-message' : 'assistant-message'"
+        >
+          <div class="message-label">{{ message.role === 'user' ? '你' : 'CampusAgent' }}</div>
+          <p class="message-content">{{ message.content }}</p>
+          <div v-if="message.response?.sources.length" class="message-sources">
+            <strong>参考来源</strong>
+            <div
+              v-for="source in message.response.sources"
+              :key="`${source.documentId}:${source.chunkIndex}`"
+              class="source-item"
+            >
+              <strong>{{ source.fileName || source.documentId }}</strong>
+              <details>
+                <summary>查看引用内容</summary>
+                <dl class="source-details">
+                  <div><dt>文档</dt><dd>{{ source.fileName }}</dd></div>
+                  <div><dt>Chunk ID</dt><dd>{{ source.documentId }}:{{ source.chunkIndex }}</dd></div>
+                  <div><dt>Rerank Score</dt><dd>{{ scoreText(source.rerankScore) }}</dd></div>
+                </dl>
+                <div class="chunk-content">{{ source.content }}</div>
+              </details>
+            </div>
+          </div>
+          <details v-if="message.response" class="turn-debug">
+            <summary>本轮调试信息</summary>
+            <p>检索问题：{{ message.response.rewrittenQuery }}</p>
+            <p>召回 {{ message.response.retrievalCount }} · 重排 {{ message.response.rerankCount }} · 使用 {{ message.response.usedContextCount }} 个片段</p>
+          </details>
+        </article>
+        <div v-if="loading && messages[messages.length - 1]?.role === 'user'" class="pending-answer">
+          CampusAgent 正在查找知识库…
+        </div>
+      </section>
 
       <el-card shadow="never" class="search-card">
         <el-form label-position="top" @submit.prevent="handleChat">
@@ -107,36 +174,11 @@ async function handleChat(): Promise<void> {
               :loading="loading"
               @click="handleChat"
             >
-              获取 AI 回答
+              发送
             </el-button>
           </div>
         </el-form>
       </el-card>
-
-      <section v-if="answer" class="answer-section" aria-live="polite">
-        <el-card shadow="never" class="answer-card">
-          <div class="question-label">你的问题</div>
-          <p class="asked-question">{{ askedQuestion }}</p>
-          <el-divider />
-          <h2>CampusAgent</h2>
-          <p class="answer-text">{{ answer.answer }}</p>
-        </el-card>
-        <el-card v-if="answer.sources.length" shadow="never" class="sources-card">
-          <h2>参考来源</h2>
-          <div v-for="source in answer.sources" :key="`${source.documentId}:${source.chunkIndex}`" class="source-item">
-            <strong>{{ source.fileName || source.documentId }}</strong>
-            <details>
-              <summary>查看引用内容</summary>
-              <dl class="source-details">
-                <div><dt>文档</dt><dd>{{ source.fileName }}</dd></div>
-                <div><dt>Chunk ID</dt><dd>{{ source.documentId }}:{{ source.chunkIndex }}</dd></div>
-                <div><dt>Rerank Score</dt><dd>{{ scoreText(source.rerankScore) }}</dd></div>
-              </dl>
-              <div class="chunk-content">{{ source.content }}</div>
-            </details>
-          </div>
-        </el-card>
-      </section>
 
       <details class="debug-section">
         <summary>检索调试（原始 Chunk）</summary>
@@ -273,11 +315,18 @@ async function handleChat(): Promise<void> {
   margin-top: 32px;
 }
 
-.answer-section { display: grid; gap: 16px; margin-top: 24px; }
-.answer-card h2, .sources-card h2 { margin: 0 0 12px; font-size: 20px; }
-.question-label { color: #909399; font-size: 14px; }
-.asked-question, .answer-text { white-space: pre-wrap; line-height: 1.8; }
-.answer-text { color: #303133; font-size: 18px; }
+.conversation-section { display: grid; gap: 14px; margin-bottom: 24px; }
+.conversation-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.conversation-heading h2 { margin: 0; font-size: 20px; }
+.chat-message { max-width: 86%; padding: 16px 20px; border: 1px solid #dfe4ec; border-radius: 14px; background: #fff; }
+.user-message { justify-self: end; background: #ecf5ff; border-color: #c6e2ff; }
+.assistant-message { justify-self: start; }
+.message-label { color: #606266; font-size: 13px; font-weight: 600; }
+.message-content { margin: 8px 0 0; color: #303133; white-space: pre-wrap; line-height: 1.8; overflow-wrap: anywhere; }
+.message-sources { margin-top: 18px; padding-top: 12px; border-top: 1px solid #e4e7ed; font-size: 14px; }
+.turn-debug { margin-top: 14px; color: #606266; font-size: 13px; }
+.turn-debug p { margin: 8px 0; font-size: inherit; overflow-wrap: anywhere; }
+.pending-answer { color: #909399; font-size: 14px; }
 .source-item { padding: 12px 0; border-top: 1px solid #e4e7ed; }
 .source-item summary, .debug-section summary { cursor: pointer; color: #409eff; margin-top: 8px; }
 .source-details { display: grid; gap: 8px; margin: 12px 0; }
@@ -347,5 +396,7 @@ async function handleChat(): Promise<void> {
   .metadata-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .chat-message { max-width: 100%; }
 }
 </style>

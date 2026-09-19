@@ -1,9 +1,25 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class ConversationMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+    @field_validator("content")
+    @classmethod
+    def content_must_not_be_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("content must not be blank")
+        return value
 
 
 class RagChatRequest(BaseModel):
     query: str = Field(min_length=1, max_length=4000)
     knowledge_base_id: str | None = Field(default=None, alias="knowledgeBaseId", max_length=128)
+    history: list[ConversationMessage] = Field(default_factory=list, max_length=100)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -34,5 +50,6 @@ class RagChatData(BaseModel):
     retrieval_count: int = Field(alias="retrievalCount")
     rerank_count: int = Field(alias="rerankCount")
     used_context_count: int = Field(alias="usedContextCount")
+    rewritten_query: str = Field(alias="rewrittenQuery")
 
     model_config = ConfigDict(populate_by_name=True)

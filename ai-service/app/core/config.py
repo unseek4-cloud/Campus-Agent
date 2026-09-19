@@ -52,10 +52,15 @@ class Settings(BaseSettings):
     rag_min_relative_score: float = Field(default=0.4, ge=0, le=1)
     rag_max_context_chars: int = Field(default=6000, ge=500, le=50000)
 
+    conversation_max_messages: int = Field(default=8, ge=1, le=100)
+    query_rewrite_enabled: bool = True
+    query_rewrite_temperature: float = Field(default=0, ge=0, le=2)
+
     llm_provider: str = "qwen"
     qwen_api_key: str = ""
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     qwen_model: str = "qwen-plus"
+    qwen_trust_env: bool = False
     llm_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
     llm_temperature: float = Field(default=0.2, ge=0, le=2)
     llm_max_tokens: int = Field(default=1000, ge=1, le=8192)

@@ -7,6 +7,7 @@ public record RagChatResponse(
         List<RagSource> sources,
         int retrievalCount,
         int rerankCount,
-        int usedContextCount
+        int usedContextCount,
+        String rewrittenQuery
 ) {
 }

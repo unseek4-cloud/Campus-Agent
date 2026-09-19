@@ -37,6 +37,12 @@ export interface KnowledgeSearchResponse {
 export interface RagChatRequest {
   query: string
   knowledgeBaseId?: string
+  history?: ConversationMessage[]
+}
+
+export interface ConversationMessage {
+  role: 'user' | 'assistant'
+  content: string
 }
 
 export interface RagSource {
@@ -55,4 +61,5 @@ export interface RagChatResponse {
   retrievalCount: number
   rerankCount: number
   usedContextCount: number
+  rewrittenQuery: string
 }

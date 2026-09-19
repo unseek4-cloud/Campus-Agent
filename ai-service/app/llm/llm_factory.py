@@ -13,5 +13,6 @@ def create_llm_provider(settings: Settings) -> LlmProvider:
             timeout_seconds=settings.llm_timeout_seconds,
             temperature=settings.llm_temperature,
             max_tokens=settings.llm_max_tokens,
+            trust_env=settings.qwen_trust_env,
         )
     raise LlmConfigurationError(f"Unsupported LLM provider: {settings.llm_provider}")

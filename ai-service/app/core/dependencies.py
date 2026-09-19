@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from app.core.config import get_settings
+from app.conversation.query_rewriter import QueryRewriter
 from app.llm.llm_factory import create_llm_provider
 from app.infrastructure.docx.docx_extractor import DocxDocumentExtractor
 from app.infrastructure.embeddings.sentence_transformer_embedding import (
@@ -120,6 +121,7 @@ def get_retrieval_service() -> RetrievalService:
 @lru_cache
 def get_rag_service() -> RagService:
     settings = get_settings()
+    llm = create_llm_provider(settings)
     return RagService(
         retrieval=get_retrieval_service(),
         result_filter=RerankResultFilter(
@@ -128,6 +130,9 @@ def get_rag_service() -> RagService:
             min_relative_score=settings.rag_min_relative_score,
         ),
         context_builder=ContextBuilder(settings.rag_max_context_chars),
-        llm=create_llm_provider(settings),
+        llm=llm,
         retrieval_top_k=settings.rag_retrieval_top_k,
+        query_rewriter=QueryRewriter(llm, settings.query_rewrite_temperature),
+        conversation_max_messages=settings.conversation_max_messages,
+        query_rewrite_enabled=settings.query_rewrite_enabled,
     )

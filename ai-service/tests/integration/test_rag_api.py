@@ -9,9 +9,10 @@ from app.services.rag_service import RagResult
 
 
 class FakeRagService:
-    def answer(self, query: str, knowledge_base_id: str | None = None) -> RagResult:
+    def answer(self, query: str, knowledge_base_id: str | None = None, history=None) -> RagResult:
         assert query == "心理测评时间是什么时候？"
         assert knowledge_base_id == "kb-1"
+        assert history == []
         match = VectorSearchResult(
             content="调查时间：2026年9月20日至9月30日。",
             score=0.6,
@@ -48,6 +49,7 @@ def test_rag_api_returns_answer_and_actual_source() -> None:
     assert data["retrievalCount"] == 10
     assert data["rerankCount"] == 5
     assert data["usedContextCount"] == 1
+    assert data["rewrittenQuery"] == "心理测评时间是什么时候？"
     assert data["sources"][0]["documentId"] == "doc-1"
     assert data["sources"][0]["chunkIndex"] == 4
     assert data["sources"][0]["content"] == "调查时间：2026年9月20日至9月30日。"
@@ -67,7 +69,7 @@ def test_rag_api_maps_provider_errors() -> None:
         (LlmProviderError("LLM returned empty content"), 502, "LLM_REQUEST_FAILED"),
     ]:
         class FailingRagService:
-            def answer(self, query: str, knowledge_base_id: str | None = None) -> RagResult:
+            def answer(self, query: str, knowledge_base_id: str | None = None, history=None) -> RagResult:
                 raise error
 
         app.dependency_overrides[get_rag_service] = FailingRagService
