@@ -1,4 +1,9 @@
 import logging
+from collections import Counter
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Event, Semaphore
+from time import monotonic
 
 from app.core.exceptions import (
     OcrError,
@@ -27,6 +32,10 @@ class OcrFallbackDocumentExtractor(DocumentExtractor):
         enabled: bool,
         dpi: int,
         max_ocr_pages_per_document: int,
+        max_concurrency: int = 1,
+        text_threshold: int = 1,
+        work_limit: Semaphore | None = None,
+        strict_ocr: bool = False,
     ) -> None:
         if dpi <= 0:
             raise ValueError("dpi must be greater than zero")
@@ -40,14 +49,26 @@ class OcrFallbackDocumentExtractor(DocumentExtractor):
         self._enabled = enabled
         self._dpi = dpi
         self._max_ocr_pages_per_document = max_ocr_pages_per_document
+        self._max_concurrency = max_concurrency
+        self._text_threshold = text_threshold
+        self._work_limit = work_limit
+        self._strict_ocr = strict_ocr
 
     def extract(self, content: bytes) -> list[DocumentPage]:
+        return self.extract_with_progress(content)
+
+    def extract_with_progress(self, content: bytes,
+                              progress: Callable[[str, int, int, str], None] | None = None) -> list[DocumentPage]:
+        started = monotonic()
         pages = self._text_extractor.extract(content)
+        logger.info("[PDF] pages=%d text_extract_seconds=%.2f", len(pages), monotonic()-started)
+        if progress:
+            progress("PARSING", 0, len(pages), "none")
         if not self._enabled:
             return pages
 
         ocr_candidates = [
-            page for page in pages if not self._cleaner.clean(page.text)
+            page for page in pages if len(self._cleaner.clean(page.text)) < self._text_threshold
         ]
         if len(ocr_candidates) > self._max_ocr_pages_per_document:
             raise OcrPageLimitExceededError(
@@ -56,40 +77,66 @@ class OcrFallbackDocumentExtractor(DocumentExtractor):
                 f"{self._max_ocr_pages_per_document}"
             )
 
-        candidate_page_numbers = {page.page_number for page in ocr_candidates}
-        merged_pages: list[DocumentPage] = []
-        ocr_available = True
+        if not ocr_candidates:
+            logger.info("[OCR] pages=%d scanned=0 ocr_seconds=0", len(pages))
+            return pages
+        ocr_started = monotonic()
+        if progress:
+            progress("OCR_PROCESSING", len(pages)-len(ocr_candidates), len(pages), "none")
+        results: dict[int, DocumentPage] = {}
+        providers: Counter[str] = Counter()
+        errors: list[Exception] = []
+        unavailable = Event()
 
-        for page in pages:
-            if page.page_number not in candidate_page_numbers or not ocr_available:
-                merged_pages.append(page)
-                continue
-
-            text = ""
+        def recognize(page: DocumentPage) -> tuple[DocumentPage, str]:
+            if unavailable.is_set():
+                return DocumentPage(page.page_number, ""), "skipped"
+            if self._work_limit:
+                self._work_limit.acquire()
             try:
+                if unavailable.is_set():
+                    return DocumentPage(page.page_number, ""), "skipped"
                 rendered_page = self._page_renderer.render_page(
                     content=content,
                     page_number=page.page_number,
                     dpi=self._dpi,
                 )
-                text = self._ocr_service.recognize(rendered_page.image)
-            except OcrUnavailableError as exception:
-                ocr_available = False
-                logger.warning(
-                    "OCR is unavailable; remaining empty pages will be skipped "
-                    "(page_number=%s): %s",
-                    page.page_number,
-                    exception,
-                )
-            except (OcrError, PdfPageRenderingError) as exception:
-                logger.warning(
-                    "OCR fallback failed for PDF page %s: %s",
-                    page.page_number,
-                    exception,
-                )
+                recognize_with_provider = getattr(self._ocr_service, "recognize_with_provider", None)
+                if callable(recognize_with_provider):
+                    result = recognize_with_provider(rendered_page.image)
+                    return DocumentPage(page.page_number, result.text), result.provider
+                try:
+                    return DocumentPage(page.page_number, self._ocr_service.recognize(rendered_page.image)), "paddle"
+                except OcrUnavailableError:
+                    unavailable.set()
+                    raise
+            finally:
+                if self._work_limit:
+                    self._work_limit.release()
 
-            merged_pages.append(
-                DocumentPage(page_number=page.page_number, text=text or "")
-            )
+        with ThreadPoolExecutor(max_workers=self._max_concurrency) as executor:
+            futures = {executor.submit(recognize, page): page for page in ocr_candidates}
+            for future in as_completed(futures):
+                page = futures[future]
+                try:
+                    result, provider = future.result()
+                    results[page.page_number] = result
+                    providers[provider] += 1
+                    logger.info("[OCR] page=%s provider=%s success", page.page_number, provider)
+                except (OcrError, OcrUnavailableError, PdfPageRenderingError) as exception:
+                    errors.append(exception)
+                    results[page.page_number] = DocumentPage(page.page_number, "")
+                    logger.warning("[OCR] page=%s failed type=%s", page.page_number, type(exception).__name__)
+                if progress:
+                    progress("OCR_PROCESSING", len(pages)-len(ocr_candidates)+len(results), len(pages),
+                             "qwen_to_paddle" if providers["qwen_to_paddle"] else
+                             "mixed" if providers["qwen"] and providers["paddle"] else
+                             "qwen" if providers["qwen"] else "paddle")
 
-        return merged_pages
+        if errors and self._strict_ocr:
+            raise OcrError("One or more PDF pages could not be recognized") from errors[0]
+        logger.info("[OCR] pages=%d scanned=%d qwen=%d paddle=%d fallback=%d ocr_seconds=%.2f",
+                    len(pages), len(ocr_candidates), providers["qwen"],
+                    providers["paddle"] + providers["qwen_to_paddle"],
+                    providers["qwen_to_paddle"], monotonic()-ocr_started)
+        return [results.get(page.page_number, page) for page in pages]

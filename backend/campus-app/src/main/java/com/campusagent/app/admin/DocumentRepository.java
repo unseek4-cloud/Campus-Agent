@@ -16,7 +16,9 @@ public class DocumentRepository {
             rs.getString("original_filename"), rs.getString("file_type"), rs.getString("mime_type"),
             rs.getLong("file_size"), rs.getString("file_hash"), rs.getString("status"),
             rs.getInt("chunk_count"), rs.getString("error_message"),
-            rs.getTimestamp("created_at").toLocalDateTime(), rs.getTimestamp("updated_at").toLocalDateTime());
+            rs.getTimestamp("created_at").toLocalDateTime(), rs.getTimestamp("updated_at").toLocalDateTime(),
+            rs.getString("parse_status"), rs.getInt("progress"), rs.getInt("total_pages"),
+            rs.getInt("processed_pages"), rs.getString("ocr_provider"));
 
     public DocumentRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
@@ -35,16 +37,32 @@ public class DocumentRepository {
                 document.fileType(), document.mimeType(), document.fileSize(), document.fileHash(), document.status());
     }
 
-    public void processed(String id, int count) {
-        jdbc.update("UPDATE knowledge_document SET status='SUCCESS',chunk_count=?,error_message=NULL WHERE id=?", count, id);
+    public void processed(String id, DocumentAiClient.ProcessResult result) {
+        jdbc.update("UPDATE knowledge_document SET status='SUCCESS',parse_status='COMPLETED',progress=100,chunk_count=?,total_pages=?,processed_pages=?,ocr_provider=?,error_message=NULL WHERE id=?",
+                result.chunkCount(), result.pageCount(), result.pageCount(), result.ocrProvider(), id);
     }
 
     public void failed(String id, String message) {
-        jdbc.update("UPDATE knowledge_document SET status='FAILED',error_message=? WHERE id=?", message, id);
+        jdbc.update("UPDATE knowledge_document SET status='FAILED',parse_status='FAILED',error_message=? WHERE id=?", message, id);
     }
 
     public void processing(String id) {
-        jdbc.update("UPDATE knowledge_document SET status='PROCESSING',error_message=NULL,chunk_count=0 WHERE id=?", id);
+        jdbc.update("UPDATE knowledge_document SET status='PROCESSING',parse_status='UPLOADED',progress=5,"
+                + "processed_pages=0,total_pages=0,ocr_provider='none',error_message=NULL,chunk_count=0 WHERE id=?", id);
+    }
+
+    public void progress(String id, DocumentAiClient.Progress progress) {
+        int value = Math.min(99, Math.max(0, progress.progress()));
+        jdbc.update("UPDATE knowledge_document SET parse_status=CASE WHEN ? >= progress THEN ? ELSE parse_status END,"
+                + "progress=GREATEST(progress,?),processed_pages=GREATEST(processed_pages,?),"
+                + "total_pages=GREATEST(total_pages,?),"
+                + "ocr_provider=CASE WHEN ? >= progress THEN ? ELSE ocr_provider END WHERE id=? AND status='PROCESSING'",
+                value, progress.status(), value, progress.currentPage(), progress.totalPages(),
+                value, progress.ocrProvider(), id);
+    }
+
+    public void failInterrupted() {
+        jdbc.update("UPDATE knowledge_document SET status='FAILED',parse_status='FAILED',error_message='服务重启中断处理，请重新解析' WHERE status='PROCESSING'");
     }
 
     public void rename(String id, String name) {

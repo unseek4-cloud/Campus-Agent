@@ -1,6 +1,7 @@
 """Format adapters returning the same page model used by the existing chunker."""
 
 from io import BytesIO
+from collections.abc import Callable
 import re
 from xml.etree import ElementTree as ET
 from zipfile import BadZipFile, ZipFile
@@ -113,7 +114,21 @@ class ImageParser(DocumentExtractor):
         self._ocr = ocr
 
     def extract(self, content: bytes) -> list[DocumentPage]:
-        return [DocumentPage(1, self._ocr.recognize(content))]
+        return self.extract_with_progress(content)
+
+    def extract_with_progress(self, content: bytes,
+                              progress: Callable[[str, int, int, str], None] | None = None) -> list[DocumentPage]:
+        if progress:
+            progress("OCR_PROCESSING", 0, 1, "none")
+        recognize_with_provider = getattr(self._ocr, "recognize_with_provider", None)
+        if callable(recognize_with_provider):
+            result = recognize_with_provider(content)
+            text, provider = result.text, result.provider
+        else:
+            text, provider = self._ocr.recognize(content), "paddle"
+        if progress:
+            progress("OCR_PROCESSING", 1, 1, provider)
+        return [DocumentPage(1, text)]
 
 
 class ParserRegistry:

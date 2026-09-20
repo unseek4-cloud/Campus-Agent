@@ -1,13 +1,13 @@
 # CampusAgent AI Service
 
-包含知识库入库、检索和 RAG 问答能力：普通/扫描 PDF 和 DOCX 文本提取、清洗、切块、Embedding、Chroma 向量持久化、TopK 相似度召回、本地 CrossEncoder 重排和千问答案生成。扫描页通过 PaddleOCR 在本地完成中英文 OCR。
+包含知识库入库、检索和 RAG 问答能力：普通/扫描 PDF 和 DOCX 文本提取、清洗、切块、Embedding、Chroma 向量持久化、TopK 相似度召回、本地 CrossEncoder 重排和千问答案生成。扫描页优先使用 Qwen OCR，失败时由 PaddleOCR 在本地继续处理。
 
 ## 启动
 
-```bash
+```powershell
 python -m venv .venv
 python -m pip install -r requirements.txt
-Copy-Item .env.example .env
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -15,7 +15,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 所有业务 JSON 响应中的 `timestamp` 统一使用 UTC+8，并携带明确的 `+08:00` 偏移量。HTTP `Date` 响应头按协议规范继续使用 GMT。
 
-首次处理文档时，Sentence Transformers 会下载 `AI_EMBEDDING_MODEL_NAME` 指定的模型。首次执行检索时会延迟加载 `AI_RERANK_MODEL_NAME` 指定的 CrossEncoder。首次遇到需要 OCR 的扫描页时，PaddleOCR 也会下载 OCR 模型。生产环境应提前缓存模型，并保证运行环境能访问模型下载源。
+首次处理文档时，Sentence Transformers 会下载 `AI_EMBEDDING_MODEL_NAME` 指定的模型。首次执行检索时会延迟加载 `AI_RERANK_MODEL_NAME` 指定的 CrossEncoder。首次实际使用本地 OCR 时，PaddleOCR 会下载并缓存模型。生产环境若需本地兜底，应提前缓存模型。
 
 ## 文档处理接口
 
@@ -42,7 +42,7 @@ Chroma 默认持久化到 `var/chroma`。该目录是运行时数据，不应提
 DOCX 会保留段落和表格文字顺序。DOCX 文件本身没有稳定的渲染页码，因此其
 chunk metadata 和检索结果中的 `pageNumber` 为 `null`，不会伪造页码。
 
-其他格式使用 `ParserRegistry` 选择解析器：TXT/Markdown 解码 UTF-8，XLSX 保留工作表和表头，PPTX 按幻灯片保留页码，图片复用 PaddleOCR。扩展名、MIME 与文件签名共同校验；旧版 Office 和未知二进制文件被拒绝。解析后全部复用现有清洗、切片、Embedding 和 Chroma 流程。管理员重命名会调用 `PATCH /internal/v1/documents/{id}/name` 更新 Chroma 引用元数据；删除和重解析继续使用原有向量删除接口。
+其他格式使用 `ParserRegistry` 选择解析器：TXT/Markdown 解码 UTF-8，XLSX 保留工作表和表头，PPTX 按幻灯片保留页码，图片使用同一 OCRManager。扩展名、MIME 与文件签名共同校验；旧版 Office 和未知二进制文件被拒绝。解析后全部复用现有清洗、切片、批量 Embedding 和 Chroma 流程。管理员重命名会调用 `PATCH /internal/v1/documents/{id}/name` 更新 Chroma 引用元数据；删除继续使用原有向量删除接口。`GET /internal/v1/documents/{id}/progress` 返回当前处理阶段和页数，进度保存在 AI 服务单进程内存中。
 
 ## 知识库检索接口
 
@@ -159,12 +159,12 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8000/internal/v1/rag/chat -
 PDF
   → pypdf 按页提取
   → 有可用文本：直接保留
-  → 无可用文本：仅渲染该页并执行 PaddleOCR
+  → 有效文本不足阈值：仅渲染该页并执行 Qwen OCR；异常时回退 PaddleOCR
   → 合并全部页面，并保留原始页码
   → TextCleaner → ChunkService → EmbeddingService → Chroma
 ```
 
-普通文字型 PDF 不会触发页面渲染或 OCR，也不会加载 PaddleOCR 模型。混合 PDF 只 OCR 无文字的页面。单页渲染或 OCR 失败不会中断其他页面；只有最终所有页面都没有可用文本时，接口才返回 `DOCUMENT_HAS_NO_TEXT`。
+普通文字型 PDF 不会触发页面渲染或 OCR，也不会加载 PaddleOCR 模型。混合 PDF 只 OCR 文本不足阈值的页面。页面任务最多并发 `AI_OCR_MAX_CONCURRENCY` 个，按原页码合并。PaddleOCR 仍以懒加载单例和推理锁复用。实际入库流程中若两种引擎都失败，整份文档标记失败并清理向量，避免留下残缺知识库。
 
 为避免超大扫描文件消耗过多 CPU 和内存，需要 OCR 的页面数超过 `AI_OCR_MAX_PAGES_PER_DOCUMENT` 时会在写入向量前返回 `OCR_PAGE_LIMIT_EXCEEDED`，不会创建残缺索引。
 
@@ -173,24 +173,41 @@ PDF
 ```dotenv
 AI_OCR_ENABLED=true
 AI_OCR_LANGUAGE=ch
-AI_OCR_DPI=300
+AI_OCR_DPI=200
 AI_OCR_DEVICE=cpu
 AI_OCR_ENABLE_MKLDNN=false
 AI_OCR_MAX_PAGES_PER_DOCUMENT=50
+AI_OCR_MODE=hybrid
+AI_OCR_ALLOW_CLOUD=true
+AI_OCR_MAX_CONCURRENCY=4
+AI_OCR_TEXT_THRESHOLD=50
+AI_QWEN_OCR_ENABLED=true
+AI_QWEN_OCR_MODEL=qwen3.5-ocr
+AI_QWEN_OCR_API_KEY=
+AI_QWEN_OCR_BASE_URL=
+AI_QWEN_OCR_TIMEOUT=120
+AI_QWEN_OCR_MAX_RETRIES=2
 ```
 
 - `AI_OCR_ENABLED`：是否允许扫描页 OCR；关闭后仍可处理普通文字 PDF；
 - `AI_OCR_LANGUAGE`：PaddleOCR 语言，校园中文资料建议使用 `ch`，可识别常见中英文混排；
-- `AI_OCR_DPI`：扫描页渲染分辨率，默认 300；降低到 200 可减少 CPU 和内存消耗；
+- `AI_OCR_DPI`：扫描页渲染分辨率，默认 200；
 - `AI_OCR_DEVICE`：`cpu`、`gpu` 或 `gpu:0` 等设备标识；
 - `AI_OCR_ENABLE_MKLDNN`：是否启用 oneDNN/MKL-DNN CPU 加速；Windows 下 PP-OCRv6 与部分 PaddlePaddle 版本存在兼容问题，默认关闭；
 - `AI_OCR_MAX_PAGES_PER_DOCUMENT`：单个文档允许执行 OCR 的最大页数，只统计没有可用文本的页面。
+- `AI_OCR_MODE`：`hybrid` 云端优先并本地回退、`qwen` 仅云端、`paddle` 仅本地；
+- `AI_OCR_ALLOW_CLOUD=false`：覆盖模式并强制本地识别，不发送文件到云端；
+- `AI_OCR_MAX_CONCURRENCY`：扫描页并发上限，默认 4，跨文档也受共享信号量限制；
+- `AI_OCR_TEXT_THRESHOLD`：文本层低于该字符数才 OCR，默认 50；
+- `AI_QWEN_OCR_*`：独立 OCR 模型、Key、地址、请求超时和重试次数。Key 留空时依次复用 `AI_QWEN_API_KEY`、进程环境中的 `DASHSCOPE_API_KEY`；未配置时混合模式转 PaddleOCR。
+
+Qwen OCR 调用使用阿里云 [Responses API 的图片输入](https://help.aliyun.com/en/model-studio/qwen-vl-ocr)。该模型也支持通过 `file_url` 解析 PDF，但管理员上传的学校资料默认没有公网地址；本项目按页渲染并发送图片，既能只 OCR 扫描页，也无需公开原文件。使用 `qwen3.5-ocr` 时，请把 `AI_QWEN_OCR_BASE_URL` 配成与你的 Key 地域一致的百炼业务空间兼容接口地址，例如 `https://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`。无需新增 Python 依赖，现有 `httpx` 已用于请求。
 
 ### Windows 依赖
 
 默认安装的是 PaddlePaddle CPU 版。使用 64 位 Python 3.11–3.13 和官方 wheel 时，不需要另外安装 Tesseract、Poppler 或 Ghostscript。当前开发环境已在 Windows、Python 3.12 上验证。PDF 页面由 pypdfium2 渲染。
 
-CPU 下 OCR 可能较慢，尤其是 300 DPI 的长文档。需要使用 NVIDIA GPU 时，应根据 PaddlePaddle 官方安装说明卸载 CPU 包 `paddlepaddle`，安装与驱动匹配的 `paddlepaddle-gpu`，然后把 `AI_OCR_DEVICE` 改为 `gpu:0`。不要同时安装 CPU 和 GPU 两个 PaddlePaddle 包。
+CPU 下本地 OCR 可能较慢，尤其是长文档。需要使用 NVIDIA GPU 时，应根据 PaddlePaddle 官方安装说明卸载 CPU 包 `paddlepaddle`，安装与驱动匹配的 `paddlepaddle-gpu`，然后把 `AI_OCR_DEVICE` 改为 `gpu:0`。不要同时安装 CPU 和 GPU 两个 PaddlePaddle 包。
 
 PaddleOCR 模型采用延迟初始化：FastAPI 启动、健康检查和处理普通文字 PDF 时都不会加载模型。第一次真正处理扫描页时下载和初始化可能需要较长时间。
 

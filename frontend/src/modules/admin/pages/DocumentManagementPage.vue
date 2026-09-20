@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { DocumentAdd, Search, Refresh, Files } from '../icons'
-import { deleteDocument, errorText, listDocuments, renameDocument, reprocessDocument } from '../api'
+import { deleteDocument, errorText, getDocumentProgress, listDocuments, renameDocument, reprocessDocument } from '../api'
 import type { DocumentItem, DocumentPage } from '../types'
 import DocumentTable from '../components/DocumentTable.vue'
 import DocumentUploader from '../components/DocumentUploader.vue'
@@ -23,6 +23,20 @@ watch([type,status], () => { currentPage.value = 1; load() })
 watch(search, () => { clearTimeout(debounce); debounce = setTimeout(() => { currentPage.value = 1; load() }, 300) })
 watch(currentPage, load)
 onMounted(load)
+let polling = false
+const pollTimer = setInterval(async () => {
+  if (polling) return
+  const active = page.value.items.filter(item => item.status === 'PROCESSING')
+  if (!active.length) return
+  polling = true
+  try {
+    const updated = await Promise.all(active.map(item => getDocumentProgress(item.id).catch(() => item)))
+    const byId = new Map(updated.map(item => [item.id, item]))
+    page.value.items = page.value.items.map(item => byId.get(item.id) || item)
+    if (selected.value && byId.has(selected.value.id)) selected.value = byId.get(selected.value.id) || selected.value
+  } finally { polling = false }
+}, 1500)
+onUnmounted(() => { clearInterval(pollTimer); clearTimeout(debounce) })
 function view(item: DocumentItem) { selected.value = item; detailOpen.value = true }
 async function rename(item: DocumentItem) {
   if (busyId.value) return
@@ -45,7 +59,7 @@ async function reprocess(item: DocumentItem) {
   try {
     await ElMessageBox.confirm('重新解析将重新生成文本片段和向量索引，是否继续？', '重新解析', { confirmButtonText: '继续解析', cancelButtonText: '取消' })
     busyId.value = item.id; ElMessage.info('开始重新解析'); const result = await reprocessDocument(item.id)
-    if (result.status === 'FAILED') ElMessage.error('解析失败，请查看文档详情'); else ElMessage.success('重新解析完成')
+    if (result.status === 'FAILED') ElMessage.error('无法开始解析，请查看文档详情'); else ElMessage.success('重新解析已开始')
     await load()
   } catch (e) { if (e !== 'cancel' && e !== 'close') ElMessage.error(errorText(e)) }
   finally { busyId.value = '' }

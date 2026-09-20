@@ -42,6 +42,7 @@ class DocumentProcessingResult:
     chunk_count: int
     embedding_model: str
     content_sha256: str
+    ocr_provider: str = "none"
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,0 +1,10 @@
+ALTER TABLE knowledge_document
+    ADD COLUMN parse_status VARCHAR(24) NOT NULL DEFAULT 'UPLOADED',
+    ADD COLUMN progress INT NOT NULL DEFAULT 0,
+    ADD COLUMN total_pages INT NOT NULL DEFAULT 0,
+    ADD COLUMN processed_pages INT NOT NULL DEFAULT 0,
+    ADD COLUMN ocr_provider VARCHAR(32) NOT NULL DEFAULT 'none';
+
+UPDATE knowledge_document
+SET parse_status = CASE status WHEN 'SUCCESS' THEN 'COMPLETED' WHEN 'FAILED' THEN 'FAILED' ELSE 'UPLOADED' END,
+    progress = CASE status WHEN 'SUCCESS' THEN 100 ELSE 0 END;

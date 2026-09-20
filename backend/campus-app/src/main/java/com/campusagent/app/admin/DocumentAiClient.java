@@ -21,6 +21,8 @@ import java.util.Map;
 
 @Component
 public class DocumentAiClient {
+    public record ProcessResult(int chunkCount, int pageCount, String ocrProvider) { }
+    public record Progress(String status, int currentPage, int totalPages, int progress, String ocrProvider) { }
     private final RestClient client;
     private final ObjectMapper mapper;
 
@@ -29,7 +31,7 @@ public class DocumentAiClient {
             @Value("${campus.ai-service.base-url}") String baseUrl) {
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(
                 HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(15)).build());
-        factory.setReadTimeout(Duration.ofMinutes(10));
+        factory.setReadTimeout(Duration.ofHours(3));
         this.client = builder.baseUrl(baseUrl).requestFactory(factory).build();
         this.mapper = mapper;
     }
@@ -64,7 +66,7 @@ public class DocumentAiClient {
         return new BusinessException("AI_SERVICE_UNAVAILABLE", "AI 服务不可用，请稍后重试", HttpStatus.SERVICE_UNAVAILABLE);
     }
 
-    public int process(DocumentRecord document, byte[] bytes) {
+    public ProcessResult process(DocumentRecord document, byte[] bytes) {
         MultiValueMap<String,Object> parts = new LinkedMultiValueMap<>();
         parts.add("documentId", document.id()); parts.add("knowledgeBaseId", document.knowledgeBaseId());
         parts.add("file", new ByteArrayResource(bytes) {
@@ -73,7 +75,18 @@ public class DocumentAiClient {
         try {
             JsonNode response = client.post().uri("/internal/v1/documents/process")
                     .contentType(MediaType.MULTIPART_FORM_DATA).body(parts).retrieve().body(JsonNode.class);
-            return data(response).path("chunkCount").asInt();
+            JsonNode result = data(response);
+            return new ProcessResult(result.path("chunkCount").asInt(), result.path("pageCount").asInt(),
+                    result.path("ocrProvider").asText("none"));
+        } catch (RestClientException exception) { throw translate(exception); }
+    }
+
+    public Progress progress(String id) {
+        try {
+            JsonNode result = data(client.get().uri("/internal/v1/documents/{id}/progress", id).retrieve().body(JsonNode.class));
+            return new Progress(result.path("status").asText("PARSING"), result.path("currentPage").asInt(),
+                    result.path("totalPages").asInt(), result.path("progress").asInt(),
+                    result.path("ocrProvider").asText("none"));
         } catch (RestClientException exception) { throw translate(exception); }
     }
 

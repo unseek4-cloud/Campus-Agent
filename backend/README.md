@@ -46,9 +46,10 @@ RAG 问答：`POST /api/rag/chat`，请求 `{"query":"心理测评时间是什�
 | GET | `/api/admin/config` | 上传上限 |
 | GET | `/api/admin/documents` | `search`、`type`、`status`、`page`、`pageSize` 分页查询 |
 | GET | `/api/admin/documents/{id}` | 文档详情与失败原因 |
+| GET | `/api/admin/documents/{id}/progress` | 当前阶段、页数与处理进度 |
 | POST | `/api/admin/documents` | `multipart/form-data` 单文件上传；前端逐文件批量调用 |
 | PATCH | `/api/admin/documents/{id}/name` | JSON `{ "name": "新名称" }`，同步引用元数据 |
-| POST | `/api/admin/documents/{id}/reprocess` | 清除旧向量后重新解析 |
+| POST | `/api/admin/documents/{id}/reprocess` | 后台重新解析同一文档 |
 | DELETE | `/api/admin/documents/{id}` | 删除向量、原文件、元数据 |
 
-上传响应 `data` 为 `{ "duplicate": false, "document": {...} }`；重复文件返回 `duplicate: true` 和已存在文档，不重复生成向量。上传及重新解析期间记录 `PROCESSING`，完成后为 `SUCCESS` 或 `FAILED`。当前项目没有账号系统，正式部署前须给 `/api/admin/**` 增加管理员认证与授权。
+上传响应 `data` 为 `{ "duplicate": false, "taskId": "文档ID", "documentId": "文档ID", "status": "PROCESSING", "document": {...} }`，保存文件后即返回；重复文件返回 `duplicate: true` 和已存在文档，不重复生成向量。后台最多同时处理 2 份文档，等待队列上限 16。`status` 保持旧接口的 `PROCESSING` / `SUCCESS` / `FAILED`，`parseStatus` 给出更细的阶段。前端每 1.5 秒轮询进度。失败详情仅显示友好提示，异常堆栈留在日志。已有数据库升级前须执行 [V2 迁移 SQL](campus-app/src/main/resources/db/migration/V2__document_ocr_progress.sql)；新数据库由 `schema.sql` 建表。当前项目没有账号系统，正式部署前须给 `/api/admin/**` 增加管理员认证与授权。

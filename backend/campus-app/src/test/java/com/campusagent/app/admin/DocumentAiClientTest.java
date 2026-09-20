@@ -31,7 +31,7 @@ class DocumentAiClientTest {
                     "http://127.0.0.1:" + server.getAddress().getPort());
             DocumentRecord document = new DocumentRecord("doc-1", "kb-1", "规则.pdf", "规则.pdf", "pdf",
                     "application/pdf", 9, "hash", "PROCESSING", 0, null, LocalDateTime.now(), LocalDateTime.now());
-            assertEquals(2, client.process(document, "%PDF-test".getBytes(StandardCharsets.UTF_8)));
+            assertEquals(2, client.process(document, "%PDF-test".getBytes(StandardCharsets.UTF_8)).chunkCount());
             assertTrue(contentType.get().startsWith("multipart/form-data"), contentType.get());
             assertTrue(contentType.get().contains("boundary="), contentType.get());
             assertTrue(body.get().contains("name=\"documentId\""));

@@ -21,6 +21,7 @@ public class AdminDocumentController {
         return ApiResponse.success(service.list(search,type,status,page,pageSize));
     }
     @GetMapping("/documents/{id}") public ApiResponse<DocumentRecord> detail(@PathVariable String id) { return ApiResponse.success(service.detail(id)); }
+    @GetMapping("/documents/{id}/progress") public ApiResponse<DocumentRecord> progress(@PathVariable String id) { return ApiResponse.success(service.progress(id)); }
     @PostMapping("/documents") public ApiResponse<Map<String,Object>> upload(@RequestPart("file") MultipartFile file) { return ApiResponse.success(service.upload(file)); }
     @PatchMapping("/documents/{id}/name") public ApiResponse<DocumentRecord> rename(@PathVariable String id,@RequestBody Map<String,String> body) { return ApiResponse.success(service.rename(id,body.get("name"))); }
     @DeleteMapping("/documents/{id}") public ApiResponse<Map<String,Boolean>> delete(@PathVariable String id) { service.delete(id); return ApiResponse.success(Map.of("deleted",true)); }

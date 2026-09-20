@@ -65,7 +65,7 @@ cd ai-service
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-Copy-Item .env.example .env
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -83,8 +83,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 健康检查：`http://localhost:8000/internal/v1/health`，OpenAPI 文档：`http://localhost:8000/docs`。
 
 首次处理文档时会下载并加载 Embedding 模型，首次检索时会加载 Rerank
-模型，首次处理扫描页时会下载并加载 PaddleOCR 模型。这些模型在同一 AI 服务
-进程内都只初始化一次。
+模型。扫描页在 `hybrid` 模式下优先调用 Qwen OCR，失败时下载并加载 PaddleOCR 模型；本地模型在同一 AI 服务进程内只初始化一次。OCR 的 Windows 配置和验收步骤见 [升级指南](docs/ocr-upgrade.md)。
 
 ## RAG 检索开发链路
 
@@ -154,9 +153,9 @@ Java 公共接口 `POST /api/rag/chat` 的多轮请求示例：
 
 启动三个服务后访问 [管理员端](http://localhost:5173/admin)。`/admin` 展示真实文档统计和最近上传，`/admin/knowledge` 提供搜索、类型与状态筛选、分页、批量上传、详情、重命名、重新解析和删除。Swagger 与 Python OpenAPI 继续用于开发调试；日常知识库管理请使用管理员页面。本阶段尚无登录系统，**正式部署前必须接入管理员认证并限制 `/api/admin/**`**，切勿将当前接口直接开放到公网。
 
-上传支持 PDF、DOCX、TXT、Markdown、XLSX、PPTX、PNG、JPG/JPEG；不支持 DOC/XLS/PPT 等旧版 Office 格式。默认单文件上限 20 MB，由 Java 的 `ADMIN_MAX_UPLOAD_SIZE_MB` 配置，Python 的 `AI_MAX_PDF_SIZE_MB` 应设为相同或更高。前端从 Java 配置接口读取上限；Java 与 Python 均校验文件类型和内容。TXT/Markdown 使用 UTF-8；PDF 保留现有文本层与扫描页 OCR；DOCX 保留现有解析器；XLSX 按工作表提取表头和行；PPTX 按幻灯片提取文字及页码；图片使用现有 PaddleOCR。所有格式复用同一清洗、Chunk、Embedding、Chroma 入库流程。
+上传支持 PDF、DOCX、TXT、Markdown、XLSX、PPTX、PNG、JPG/JPEG；不支持 DOC/XLS/PPT 等旧版 Office 格式。默认单文件上限 20 MB，由 Java 的 `ADMIN_MAX_UPLOAD_SIZE_MB` 配置，Python 的 `AI_MAX_PDF_SIZE_MB` 应设为相同或更高。前端从 Java 配置接口读取上限；Java 与 Python 均校验文件类型和内容。TXT/Markdown 使用 UTF-8；PDF 保留现有文本层与扫描页 OCR；DOCX 保留现有解析器；XLSX 按工作表提取表头和行；PPTX 按幻灯片提取文字及页码；图片也使用 OCRManager。所有格式复用同一清洗、Chunk、Embedding、Chroma 入库流程。
 
-Java 在上传时计算 SHA-256，并通过 `(knowledge_base_id, file_hash)` 唯一约束防止同内容以不同文件名重复入库。元数据存入 MySQL 的 `knowledge_document` 表，原文件保存到 `ADMIN_DOCUMENT_STORAGE_PATH`（默认从 backend 工作目录计算的 `var/documents`），Chunk 和引用信息保存在 Chroma。`schema.sql` 在启动时创建元数据表。上传失败保留文档记录和原文件，状态为 `FAILED`，可查看错误并重新解析。重新解析先清除旧向量，再使用保存的原文件走现有入库流程。删除先清除 Chroma 向量，再清理原文件和数据库记录；任何步骤失败时 API 不返回成功。重命名同步更新 Chroma 的 `file_name` 与 `source` 引用元数据，不重新计算 Embedding。
+Java 在上传时计算 SHA-256，并通过 `(knowledge_base_id, file_hash)` 唯一约束防止同内容以不同文件名重复入库。元数据存入 MySQL 的 `knowledge_document` 表，原文件保存到 `ADMIN_DOCUMENT_STORAGE_PATH`（默认从 backend 工作目录计算的 `var/documents`），Chunk 和引用信息保存在 Chroma。`schema.sql` 在新数据库启动时创建元数据表；已有数据库执行 [V2 迁移](backend/campus-app/src/main/resources/db/migration/V2__document_ocr_progress.sql)。上传后后台解析，失败保留文档记录和原文件，状态为 `FAILED`，可重新解析。删除先清除 Chroma 向量，再清理原文件和数据库记录；任何步骤失败时 API 不返回成功。重命名同步更新 Chroma 的 `file_name` 与 `source` 引用元数据，不重新计算 Embedding。
 
 新增格式时，在 `ai-service/app/services/document_parsers.py` 实现返回 `DocumentPage` 的解析器，将扩展名、MIME 和文件头校验加入 `ParserRegistry`，再于 `get_document_service()` 注册。后续 Chunk、Embedding 与向量存储无需修改。
 

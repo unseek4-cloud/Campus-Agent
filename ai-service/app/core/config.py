@@ -21,7 +21,17 @@ class Settings(BaseSettings):
 
     ocr_enabled: bool = True
     ocr_language: str = "ch"
-    ocr_dpi: int = Field(default=300, ge=72, le=600)
+    ocr_dpi: int = Field(default=200, ge=72, le=600)
+    ocr_mode: str = "hybrid"
+    ocr_allow_cloud: bool = True
+    ocr_max_concurrency: int = Field(default=4, ge=1, le=16)
+    ocr_text_threshold: int = Field(default=50, ge=1, le=1000)
+    qwen_ocr_enabled: bool = True
+    qwen_ocr_model: str = "qwen3.5-ocr"
+    qwen_ocr_api_key: str = ""
+    qwen_ocr_base_url: str = ""
+    qwen_ocr_timeout: float = Field(default=120, gt=0, le=600)
+    qwen_ocr_max_retries: int = Field(default=2, ge=0, le=5)
     ocr_device: str = "cpu"
     ocr_enable_mkldnn: bool = False
     ocr_max_pages_per_document: int = Field(default=50, ge=1, le=1000)
@@ -92,6 +102,14 @@ class Settings(BaseSettings):
         value = value.strip()
         if not value:
             raise ValueError("ocr_language must not be blank")
+        return value
+
+    @field_validator("ocr_mode")
+    @classmethod
+    def validate_ocr_mode(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"hybrid", "qwen", "paddle"}:
+            raise ValueError("ocr_mode must be hybrid, qwen, or paddle")
         return value
 
     @field_validator("rerank_model_name")

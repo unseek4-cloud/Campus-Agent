@@ -19,11 +19,14 @@ export async function getAdminConfig(): Promise<{ maxUploadSizeMb: number }> {
 export async function getDocument(id: string): Promise<DocumentItem> {
   return (await httpClient.get<ApiResponse<DocumentItem>>(`/admin/documents/${id}`)).data.data
 }
+export async function getDocumentProgress(id: string): Promise<DocumentItem> {
+  return (await httpClient.get<ApiResponse<DocumentItem>>(`/admin/documents/${id}/progress`)).data.data
+}
 export async function uploadDocument(file: File, onProgress: (value: number) => void): Promise<UploadResult> {
   const body = new FormData(); body.append('file', file)
   return (await httpClient.post<ApiResponse<UploadResult>>('/admin/documents', body, {
     headers: { 'Content-Type': 'multipart/form-data' },
-    timeout: 600_000,
+    timeout: 60_000,
     onUploadProgress: (event) => { if (event.total) onProgress(Math.round(event.loaded / event.total * 100)) },
   })).data.data
 }
@@ -34,7 +37,15 @@ export async function deleteDocument(id: string): Promise<void> {
   await httpClient.delete(`/admin/documents/${id}`)
 }
 export async function reprocessDocument(id: string): Promise<DocumentItem> {
-  return (await httpClient.post<ApiResponse<DocumentItem>>(`/admin/documents/${id}/reprocess`, null, { timeout: 600_000 })).data.data
+  return (await httpClient.post<ApiResponse<DocumentItem>>(`/admin/documents/${id}/reprocess`)).data.data
+}
+
+export function ocrText(value: DocumentItem['ocrProvider']): string {
+  return ({ none: '无需 OCR', qwen: 'Qwen OCR', paddle: 'PaddleOCR', qwen_to_paddle: 'Qwen → PaddleOCR', mixed: '混合识别' })[value] || '待识别'
+}
+
+export function stageText(value: DocumentItem['parseStatus']): string {
+  return ({ UPLOADED: '已上传', PARSING: '解析中', OCR_PROCESSING: 'OCR 识别中', CHUNKING: '文本分块中', EMBEDDING: '向量化中', INDEXING: '入库中', COMPLETED: '已入库', FAILED: '处理失败' })[value] || '处理中'
 }
 
 export function fileSize(bytes: number): string {

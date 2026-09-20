@@ -1,6 +1,8 @@
 import hashlib
 import logging
 import re
+from collections.abc import Callable
+from time import monotonic
 from uuid import NAMESPACE_URL, uuid5
 
 from app.core.exceptions import (
@@ -51,7 +53,9 @@ class DocumentService:
             "xlsx": XlsxParser(), "pptx": PptxParser(),
         })
 
-    def process_document(self, document: DocumentInput) -> DocumentProcessingResult:
+    def process_document(self, document: DocumentInput,
+                         progress: Callable[[str, int, int, str], None] | None = None) -> DocumentProcessingResult:
+        started = monotonic()
         document_id = document.document_id.strip()
         knowledge_base_id = document.knowledge_base_id.strip()
         file_name = self._safe_file_name(document.file_name)
@@ -63,17 +67,34 @@ class DocumentService:
         extractor = self._parsers.select(file_type, document.content_type, document.content)
         logger.info("parser selected document_id=%s format=%s", document_id, file_type)
         logger.info("document parsing started document_id=%s", document_id)
-        pages = extractor.extract(document.content)
+        ocr_provider = "none"
+        def report(stage: str, current: int = 0, total: int = 0, provider: str = "none") -> None:
+            nonlocal ocr_provider
+            if provider != "none":
+                ocr_provider = provider
+            if progress:
+                progress(stage, current, total, provider)
+
+        report("PARSING")
+        parse_started = monotonic()
+        extract_with_progress = getattr(extractor, "extract_with_progress", None)
+        pages = extract_with_progress(document.content, report) if callable(extract_with_progress) else extractor.extract(document.content)
         logger.info("document parsing completed document_id=%s pages=%d", document_id, len(pages))
+        logger.info("[INGEST] document=%s extract_seconds=%.2f", document_id, monotonic()-parse_started)
         cleaned_pages = self._cleaner.clean_pages(pages)
         if not any(page.text for page in cleaned_pages):
             raise EmptyDocumentError("Document contains no usable text after extraction")
 
+        report("CHUNKING", len(pages), len(pages), ocr_provider)
+        chunk_started = monotonic()
         chunks = self._chunk_service.split(cleaned_pages)
         if not chunks:
             raise EmptyDocumentError("Document contains no text that can be chunked")
         logger.info("chunk count document_id=%s count=%d; embedding started", document_id, len(chunks))
+        logger.info("[INGEST] document=%s chunk_seconds=%.2f", document_id, monotonic()-chunk_started)
 
+        report("EMBEDDING", len(pages), len(pages), ocr_provider)
+        embedding_started = monotonic()
         embeddings = self._embedding_service.embed_documents(
             [chunk.text for chunk in chunks]
         )
@@ -81,6 +102,7 @@ class DocumentService:
             raise EmbeddingGenerationError(
                 "Embedding provider returned a different number of vectors than chunks"
             )
+        logger.info("[INGEST] document=%s embedding_seconds=%.2f", document_id, monotonic()-embedding_started)
 
         content_sha256 = hashlib.sha256(document.content).hexdigest()
         records = [
@@ -111,8 +133,12 @@ class DocumentService:
             )
             for chunk, embedding in zip(chunks, embeddings, strict=True)
         ]
+        report("INDEXING", len(pages), len(pages), ocr_provider)
         self._vector_store.replace_document(document_id, records)
         logger.info("vector save completed document_id=%s count=%d", document_id, len(records))
+        report("COMPLETED", len(pages), len(pages), ocr_provider)
+        logger.info("[INGEST] document=%s total_seconds=%.2f pages=%d chunks=%d ocr_provider=%s",
+                    document_id, monotonic()-started, len(pages), len(chunks), ocr_provider)
 
         return DocumentProcessingResult(
             document_id=document_id,
@@ -122,6 +148,7 @@ class DocumentService:
             chunk_count=len(chunks),
             embedding_model=self._embedding_service.model_name,
             content_sha256=content_sha256,
+            ocr_provider=ocr_provider,
         )
 
     def process_pdf(self, document: DocumentInput) -> DocumentProcessingResult:

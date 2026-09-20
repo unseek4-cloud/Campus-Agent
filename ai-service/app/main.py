@@ -1,4 +1,5 @@
 from uuid import uuid4
+import logging
 
 from fastapi import FastAPI, Request
 
@@ -29,3 +30,8 @@ async def add_request_id(request: Request, call_next):
 register_exception_handlers(app)
 app.include_router(api_router, prefix=settings.api_v1_prefix)
 
+logging.getLogger("uvicorn.error").info(
+    "[OCR] mode=%s qwen_enabled=%s allow_cloud=%s paddle_fallback=lazy concurrency=%d",
+    settings.ocr_mode, settings.qwen_ocr_enabled, settings.ocr_allow_cloud,
+    settings.ocr_max_concurrency,
+)

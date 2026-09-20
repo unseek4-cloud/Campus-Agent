@@ -1,11 +1,14 @@
 from collections.abc import Sequence
 from pathlib import Path
+import logging
 
 import chromadb
 
 from app.core.exceptions import VectorStoreOperationError
 from app.domain.document import VectorRecord, VectorSearchResult
 from app.vector_store.base import VectorStore
+
+logger = logging.getLogger(__name__)
 
 
 class ChromaVectorStore(VectorStore):
@@ -41,6 +44,10 @@ class ChromaVectorStore(VectorStore):
                     metadatas=[record.metadata for record in batch],
                 )
         except Exception as exception:
+            try:
+                self._collection.delete(where={"document_id": document_id})
+            except Exception:
+                logger.exception("Failed to clean partial vectors document_id=%s", document_id)
             raise VectorStoreOperationError("Failed to persist document vectors") from exception
 
     def delete_document(self, document_id: str) -> int:

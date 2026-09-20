@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
@@ -22,6 +24,11 @@ import java.util.HexFormat;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import jakarta.annotation.PreDestroy;
 import java.util.zip.ZipInputStream;
 
 @Service
@@ -33,6 +40,8 @@ public class AdminDocumentService {
     private final Path storage;
     private final String kb;
     private final long maxBytes;
+    private final ThreadPoolExecutor workers = new ThreadPoolExecutor(2, 2, 0, TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(16), task -> { Thread thread = new Thread(task, "document-ingest"); thread.setDaemon(true); return thread; });
 
     public AdminDocumentService(DocumentRepository repository, DocumentAiClient ai,
             @Value("${campus.admin.storage-path}") String storagePath,
@@ -48,6 +57,9 @@ public class AdminDocumentService {
     }
     public Map<String,Object> stats() { return repository.stats(kb); }
     public long maxUploadSizeMb() { return maxBytes / 1024 / 1024; }
+    @EventListener(ApplicationReadyEvent.class)
+    public void markInterruptedTasks() { repository.failInterrupted(); }
+    @PreDestroy public void shutdown() { workers.shutdown(); }
     public DocumentRecord detail(String id) {
         DocumentRecord d=repository.find(id);
         if (d==null || !d.knowledgeBaseId().equals(kb)) throw error("DOCUMENT_NOT_FOUND","文档不存在",HttpStatus.NOT_FOUND);
@@ -85,19 +97,47 @@ public class AdminDocumentService {
                 Files.deleteIfExists(storage.resolve(id));
                 throw databaseFailure;
             }
-            log.info("document parsing started id={} parser={}",id,type);
-            try {
-                int chunks=ai.process(doc,bytes);
-                repository.processed(id,chunks);
-                log.info("document parsing completed id={} chunk count={} vector save completed",id,chunks);
-            } catch (RuntimeException failure) {
-                log.error("document processing failed id={}",id,failure);
-                repository.failed(id, failure.getMessage());
-            }
-            return Map.of("duplicate",false,"document",detail(id));
+            enqueue(id);
+            DocumentRecord created = detail(id);
+            return Map.of("duplicate",false,"taskId",id,"documentId",id,"status",created.status(),"document",created);
         } catch (IOException | NoSuchAlgorithmException exception) {
             throw error("UPLOAD_FAILED","文件保存失败，请稍后重试",HttpStatus.INTERNAL_SERVER_ERROR);
         }
+    }
+
+    private void enqueue(String id) {
+        try { workers.execute(() -> processStored(id)); }
+        catch (RejectedExecutionException rejected) {
+            repository.failed(id, "处理队列已满，请稍后重新解析");
+            throw error("PROCESSING_QUEUE_FULL", "处理队列已满，请稍后重试", HttpStatus.SERVICE_UNAVAILABLE);
+        }
+    }
+
+    private void processStored(String id) {
+        long started = System.nanoTime();
+        try {
+            DocumentRecord doc = detail(id);
+            byte[] bytes = Files.readAllBytes(storage.resolve(id));
+            log.info("document parsing started id={} parser={}", id, doc.fileType());
+            DocumentAiClient.ProcessResult result = ai.process(doc, bytes);
+            repository.processed(id, result);
+            log.info("document parsing completed id={} pages={} chunks={} durationMs={}",
+                    id, result.pageCount(), result.chunkCount(), (System.nanoTime()-started)/1_000_000);
+        } catch (Exception failure) {
+            log.error("document processing failed id={}", id, failure);
+            try { ai.deleteVectors(id); }
+            catch (Exception cleanupFailure) { log.error("document vector cleanup failed id={}", id, cleanupFailure); }
+            repository.failed(id, "文档解析失败，请重新解析或切换 OCR 模式");
+        }
+    }
+
+    public DocumentRecord progress(String id) {
+        DocumentRecord doc = detail(id);
+        if (doc.status().equals("PROCESSING")) {
+            try { repository.progress(id, ai.progress(id)); }
+            catch (RuntimeException unavailable) { log.debug("document progress unavailable id={}", id); }
+        }
+        return detail(id);
     }
 
     private void validate(String type,String mime,byte[] bytes) {
@@ -144,6 +184,7 @@ public class AdminDocumentService {
 
     public DocumentRecord rename(String id,String requested) {
         DocumentRecord doc=detail(id);
+        if (doc.status().equals("PROCESSING")) throw error("DOCUMENT_BUSY","文档正在处理，请稍后操作",HttpStatus.CONFLICT);
         String name=requested==null ? "" : requested.trim();
         if (name.isBlank() || name.length()>240 || name.contains("/") || name.contains("\\")) throw error("INVALID_NAME","请输入有效的文档名称",HttpStatus.BAD_REQUEST);
         if (!name.toLowerCase().endsWith("."+doc.fileType())) name += "."+doc.fileType();
@@ -159,7 +200,7 @@ public class AdminDocumentService {
     }
 
     public void delete(String id) {
-        detail(id);
+        if (detail(id).status().equals("PROCESSING")) throw error("DOCUMENT_BUSY","文档正在处理，请稍后操作",HttpStatus.CONFLICT);
         ai.deleteVectors(id);
         try { Files.deleteIfExists(storage.resolve(id)); }
         catch (IOException exception) { throw error("DELETE_FAILED","原文件删除失败，请稍后重试",HttpStatus.INTERNAL_SERVER_ERROR); }
@@ -169,17 +210,11 @@ public class AdminDocumentService {
 
     public DocumentRecord reprocess(String id) {
         DocumentRecord doc=detail(id);
-        byte[] bytes;
-        try { bytes=Files.readAllBytes(storage.resolve(id)); }
-        catch (IOException exception) { throw error("SOURCE_FILE_MISSING","原文件不存在，无法重新解析",HttpStatus.CONFLICT); }
+        if (doc.status().equals("PROCESSING")) throw error("DOCUMENT_BUSY","文档正在处理，请稍后操作",HttpStatus.CONFLICT);
+        if (!Files.exists(storage.resolve(id))) throw error("SOURCE_FILE_MISSING","原文件不存在，无法重新解析",HttpStatus.CONFLICT);
         log.info("document reprocess started id={}",id);
-        ai.deleteVectors(id);
         repository.processing(id);
-        try { repository.processed(id,ai.process(doc,bytes)); }
-        catch (RuntimeException exception) {
-            repository.failed(id,exception.getMessage());
-            log.error("document processing failed id={}",id,exception);
-        }
+        enqueue(id);
         return detail(id);
     }
 

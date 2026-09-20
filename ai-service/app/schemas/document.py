@@ -9,6 +9,7 @@ class DocumentProcessData(BaseModel):
     chunk_count: int = Field(alias="chunkCount")
     embedding_model: str = Field(alias="embeddingModel")
     content_sha256: str = Field(alias="contentSha256")
+    ocr_provider: str = Field(default="none", alias="ocrProvider")
 
     model_config = ConfigDict(populate_by_name=True)
 
