@@ -2,6 +2,13 @@ server:
   port: ${SERVER_PORT:8080}
 
 spring:
+  sql:
+    init:
+      mode: always
+  servlet:
+    multipart:
+      max-file-size: ${ADMIN_MAX_UPLOAD_SIZE_MB:20}MB
+      max-request-size: ${ADMIN_MAX_UPLOAD_SIZE_MB:20}MB
   application:
     name: campus-backend
   datasource:
@@ -14,6 +21,10 @@ app:
   version: 0.1.0-SNAPSHOT
 
 campus:
+  admin:
+    max-upload-size-mb: ${ADMIN_MAX_UPLOAD_SIZE_MB:20}
+    storage-path: ${ADMIN_DOCUMENT_STORAGE_PATH:var/documents}
+    knowledge-base-id: ${ADMIN_KNOWLEDGE_BASE_ID:campus-default}
   ai-service:
     base-url: ${AI_SERVICE_BASE_URL:http://localhost:8000}
     rag-timeout-seconds: ${AI_SERVICE_RAG_TIMEOUT_SECONDS:90}

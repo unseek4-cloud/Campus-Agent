@@ -56,6 +56,17 @@ class ChromaVectorStore(VectorStore):
         except Exception as exception:
             raise VectorStoreOperationError("Failed to delete document vectors") from exception
 
+    def rename_document(self, document_id: str, file_name: str) -> int:
+        try:
+            existing = self._collection.get(where={"document_id": document_id}, include=["metadatas"])
+            ids = existing["ids"]
+            metadata = [{**item, "file_name": file_name, "source": file_name} for item in existing["metadatas"]]
+            for start in range(0, len(ids), self._batch_size):
+                self._collection.update(ids=ids[start:start+self._batch_size], metadatas=metadata[start:start+self._batch_size])
+            return len(ids)
+        except Exception as exception:
+            raise VectorStoreOperationError("Failed to rename document vectors") from exception
+
     def similarity_search(
         self,
         query_embedding: Sequence[float],

@@ -37,6 +37,13 @@ class DeletingDocumentService:
         return 7
 
 
+class RenamingDocumentService:
+    def rename_document_vectors(self, document_id: str, file_name: str) -> int:
+        assert document_id == "doc-1"
+        assert file_name == "新名称.pdf"
+        return 3
+
+
 def test_process_document_returns_unified_success_response() -> None:
     app.dependency_overrides[get_document_service] = SuccessfulDocumentService
     try:
@@ -107,3 +114,15 @@ def test_delete_document_vectors_returns_deleted_count() -> None:
         "documentId": "doc-1",
         "deletedVectorCount": 7,
     }
+
+
+def test_rename_document_vectors_updates_citation_metadata() -> None:
+    app.dependency_overrides[get_document_service] = RenamingDocumentService
+    try:
+        with TestClient(app) as client:
+            response = client.patch("/internal/v1/documents/doc-1/name", json={"fileName": "新名称.pdf"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"documentId": "doc-1", "updatedVectorCount": 3}

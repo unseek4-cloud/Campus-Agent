@@ -17,6 +17,7 @@ from app.core.exceptions import (
     LlmProviderError,
     LlmTimeoutError,
     OcrPageLimitExceededError,
+    OcrError,
     RerankError,
     UnsupportedDocumentTypeError,
     VectorStoreOperationError,
@@ -114,6 +115,11 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "OCR_PAGE_LIMIT_EXCEEDED", str(exception), _request_id(request)
             ),
         )
+
+    @app.exception_handler(OcrError)
+    async def handle_ocr_failure(request: Request, exception: OcrError) -> JSONResponse:
+        logger.exception("OCR failed", exc_info=exception)
+        return _json_error(422, ApiResponse.error("OCR_FAILED", "图片文字识别失败，请检查文件或稍后重试", _request_id(request)))
 
     @app.exception_handler(EmbeddingGenerationError)
     async def handle_embedding_failure(

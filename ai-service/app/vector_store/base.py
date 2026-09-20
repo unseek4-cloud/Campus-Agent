@@ -17,6 +17,10 @@ class VectorStore(ABC):
     def delete_document(self, document_id: str) -> int:
         """Delete all vectors belonging to one document and return the count."""
 
+    def rename_document(self, document_id: str, file_name: str) -> int:
+        """Update citation metadata for a document. Stores without support may override."""
+        raise NotImplementedError
+
     @abstractmethod
     def similarity_search(
         self,

@@ -149,3 +149,15 @@ Java 公共接口 `POST /api/rag/chat` 的多轮请求示例：
 - Java 后端负责业务、权限和 MySQL 数据。
 - Python 服务只承载文档解析、OCR、Embedding、向量存储和检索等 AI 能力。
 - 业务模块只能通过公开契约协作，禁止跨模块访问 Mapper、Entity 或数据表。
+
+## 管理员知识库
+
+启动三个服务后访问 [管理员端](http://localhost:5173/admin)。`/admin` 展示真实文档统计和最近上传，`/admin/knowledge` 提供搜索、类型与状态筛选、分页、批量上传、详情、重命名、重新解析和删除。Swagger 与 Python OpenAPI 继续用于开发调试；日常知识库管理请使用管理员页面。本阶段尚无登录系统，**正式部署前必须接入管理员认证并限制 `/api/admin/**`**，切勿将当前接口直接开放到公网。
+
+上传支持 PDF、DOCX、TXT、Markdown、XLSX、PPTX、PNG、JPG/JPEG；不支持 DOC/XLS/PPT 等旧版 Office 格式。默认单文件上限 20 MB，由 Java 的 `ADMIN_MAX_UPLOAD_SIZE_MB` 配置，Python 的 `AI_MAX_PDF_SIZE_MB` 应设为相同或更高。前端从 Java 配置接口读取上限；Java 与 Python 均校验文件类型和内容。TXT/Markdown 使用 UTF-8；PDF 保留现有文本层与扫描页 OCR；DOCX 保留现有解析器；XLSX 按工作表提取表头和行；PPTX 按幻灯片提取文字及页码；图片使用现有 PaddleOCR。所有格式复用同一清洗、Chunk、Embedding、Chroma 入库流程。
+
+Java 在上传时计算 SHA-256，并通过 `(knowledge_base_id, file_hash)` 唯一约束防止同内容以不同文件名重复入库。元数据存入 MySQL 的 `knowledge_document` 表，原文件保存到 `ADMIN_DOCUMENT_STORAGE_PATH`（默认从 backend 工作目录计算的 `var/documents`），Chunk 和引用信息保存在 Chroma。`schema.sql` 在启动时创建元数据表。上传失败保留文档记录和原文件，状态为 `FAILED`，可查看错误并重新解析。重新解析先清除旧向量，再使用保存的原文件走现有入库流程。删除先清除 Chroma 向量，再清理原文件和数据库记录；任何步骤失败时 API 不返回成功。重命名同步更新 Chroma 的 `file_name` 与 `source` 引用元数据，不重新计算 Embedding。
+
+新增格式时，在 `ai-service/app/services/document_parsers.py` 实现返回 `DocumentPage` 的解析器，将扩展名、MIME 和文件头校验加入 `ParserRegistry`，再于 `get_document_service()` 注册。后续 Chunk、Embedding 与向量存储无需修改。
+
+手工验收：进入 `/admin/knowledge` 上传一份文档，确认解析状态与片段数；将同一文件改名再上传，应显示重复提示且文档数不增加；在文档操作菜单中重命名后到学生端提问并核对来源；执行重新解析后检查片段数；删除后检查列表和学生端检索均不再出现该文档。自动验证命令：`ai-service/.venv/Scripts/python.exe -m pytest -q --basetemp .pytest-tmp`、在 `backend` 运行 `mvn test`、在 `frontend` 运行 `npm run build`。需要 MySQL、模型和千问 Key 的真实端到端问答验收仍须在完整运行环境执行。

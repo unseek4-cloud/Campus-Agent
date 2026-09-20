@@ -16,6 +16,7 @@ from app.infrastructure.rerankers.sentence_transformer_reranker import (
 )
 from app.services.chunk_service import BoundaryAwareChunkService
 from app.services.document_service import DocumentService
+from app.services.document_parsers import ParserRegistry, TextParser, MarkdownParser, XlsxParser, PptxParser, ImageParser
 from app.services.embedding_service import EmbeddingService
 from app.services.evidence_aware_rerank_service import EvidenceAwareRerankService
 from app.services.ocr_fallback_document_extractor import OcrFallbackDocumentExtractor
@@ -79,15 +80,16 @@ def get_document_service() -> DocumentService:
     """Composition root: the only place binding ports to concrete adapters."""
     settings = get_settings()
     cleaner = TextCleaner()
+    ocr = PaddleOcrService(
+            language=settings.ocr_language,
+            device=settings.ocr_device,
+            enable_mkldnn=settings.ocr_enable_mkldnn,
+        )
     extractor = OcrFallbackDocumentExtractor(
         text_extractor=PypdfDocumentExtractor(),
         cleaner=cleaner,
         page_renderer=PdfiumPageRenderer(),
-        ocr_service=PaddleOcrService(
-            language=settings.ocr_language,
-            device=settings.ocr_device,
-            enable_mkldnn=settings.ocr_enable_mkldnn,
-        ),
+        ocr_service=ocr,
         enabled=settings.ocr_enabled,
         dpi=settings.ocr_dpi,
         max_ocr_pages_per_document=settings.ocr_max_pages_per_document,
@@ -95,6 +97,12 @@ def get_document_service() -> DocumentService:
     return DocumentService(
         extractor=extractor,
         docx_extractor=DocxDocumentExtractor(),
+        parser_registry=ParserRegistry({
+            "pdf": extractor, "docx": DocxDocumentExtractor(),
+            "txt": TextParser(), "md": MarkdownParser(), "xlsx": XlsxParser(),
+            "pptx": PptxParser(), "png": ImageParser(ocr),
+            "jpg": ImageParser(ocr), "jpeg": ImageParser(ocr),
+        }),
         cleaner=cleaner,
         chunk_service=BoundaryAwareChunkService(
             chunk_size=settings.chunk_size,

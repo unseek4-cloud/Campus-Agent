@@ -25,7 +25,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 - `documentId`：Java 后端管理的文档 ID；
 - `knowledgeBaseId`：Java 后端管理的知识库 ID；
-- `file`：PDF 或 DOCX 文件。
+- `file`：PDF、DOCX、TXT、Markdown、XLSX、PPTX 或图片文件。
+- 管理员端另支持 TXT、Markdown、XLSX、PPTX、PNG、JPG/JPEG；同一内部接口处理，Java 负责元数据、去重和原文件持久化。
 
 PowerShell 示例：
 
@@ -40,6 +41,8 @@ Chroma 默认持久化到 `var/chroma`。该目录是运行时数据，不应提
 
 DOCX 会保留段落和表格文字顺序。DOCX 文件本身没有稳定的渲染页码，因此其
 chunk metadata 和检索结果中的 `pageNumber` 为 `null`，不会伪造页码。
+
+其他格式使用 `ParserRegistry` 选择解析器：TXT/Markdown 解码 UTF-8，XLSX 保留工作表和表头，PPTX 按幻灯片保留页码，图片复用 PaddleOCR。扩展名、MIME 与文件签名共同校验；旧版 Office 和未知二进制文件被拒绝。解析后全部复用现有清洗、切片、Embedding 和 Chroma 流程。管理员重命名会调用 `PATCH /internal/v1/documents/{id}/name` 更新 Chroma 引用元数据；删除和重解析继续使用原有向量删除接口。
 
 ## 知识库检索接口
 

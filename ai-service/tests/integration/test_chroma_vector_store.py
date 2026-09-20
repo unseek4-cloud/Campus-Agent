@@ -55,3 +55,12 @@ def test_chroma_store_searches_filters_and_deletes_vectors(tmp_path: Path) -> No
     assert results[0].score > results[1].score
     assert store.delete_document("doc-1") == 2
     assert store.similarity_search([1.0, 0.0, 0.5], top_k=2) == []
+
+
+def test_chroma_rename_updates_source_metadata_without_reembedding(tmp_path: Path) -> None:
+    store = ChromaVectorStore(tmp_path, "rename_documents", batch_size=1)
+    store.replace_document("doc-1", [record("one", "doc-1", 1.0), record("two", "doc-1", 0.5)])
+    assert store.rename_document("doc-1", "新名称.pdf") == 2
+    results = store.similarity_search([1.0, 0.0, 0.5], top_k=2)
+    assert all(result.metadata["file_name"] == "新名称.pdf" for result in results)
+    assert all(result.metadata["source"] == "新名称.pdf" for result in results)

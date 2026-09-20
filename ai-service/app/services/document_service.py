@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import re
 from uuid import NAMESPACE_URL, uuid5
 
@@ -18,20 +19,10 @@ from app.services.chunk_service import ChunkService
 from app.services.document_extractor import DocumentExtractor
 from app.services.embedding_service import EmbeddingService
 from app.services.text_cleaner import TextCleaner
+from app.services.document_parsers import ParserRegistry, TextParser, MarkdownParser, XlsxParser, PptxParser
 from app.vector_store.base import VectorStore
 
-_ALLOWED_CONTENT_TYPES = {
-    "pdf": {
-        "application/pdf",
-        "application/x-pdf",
-        "application/octet-stream",
-    },
-    "docx": {
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/octet-stream",
-        "application/zip",
-    },
-}
+logger = logging.getLogger(__name__)
 
 
 class DocumentService:
@@ -46,14 +37,19 @@ class DocumentService:
         vector_store: VectorStore,
         max_file_size_bytes: int,
         docx_extractor: DocumentExtractor | None = None,
+        parser_registry: ParserRegistry | None = None,
     ) -> None:
-        self._pdf_extractor = extractor
-        self._docx_extractor = docx_extractor
         self._cleaner = cleaner
         self._chunk_service = chunk_service
         self._embedding_service = embedding_service
         self._vector_store = vector_store
         self._max_file_size_bytes = max_file_size_bytes
+        self._parsers = parser_registry or ParserRegistry({
+            "pdf": extractor,
+            **({"docx": docx_extractor} if docx_extractor else {}),
+            "txt": TextParser(), "md": MarkdownParser(),
+            "xlsx": XlsxParser(), "pptx": PptxParser(),
+        })
 
     def process_document(self, document: DocumentInput) -> DocumentProcessingResult:
         document_id = document.document_id.strip()
@@ -64,14 +60,11 @@ class DocumentService:
             document, document_id, knowledge_base_id, file_name, file_type
         )
 
-        extractor = (
-            self._pdf_extractor if file_type == "pdf" else self._docx_extractor
-        )
-        if extractor is None:
-            raise UnsupportedDocumentTypeError(
-                f"No document extractor is configured for {file_type.upper()}"
-            )
+        extractor = self._parsers.select(file_type, document.content_type, document.content)
+        logger.info("parser selected document_id=%s format=%s", document_id, file_type)
+        logger.info("document parsing started document_id=%s", document_id)
         pages = extractor.extract(document.content)
+        logger.info("document parsing completed document_id=%s pages=%d", document_id, len(pages))
         cleaned_pages = self._cleaner.clean_pages(pages)
         if not any(page.text for page in cleaned_pages):
             raise EmptyDocumentError("Document contains no usable text after extraction")
@@ -79,6 +72,7 @@ class DocumentService:
         chunks = self._chunk_service.split(cleaned_pages)
         if not chunks:
             raise EmptyDocumentError("Document contains no text that can be chunked")
+        logger.info("chunk count document_id=%s count=%d; embedding started", document_id, len(chunks))
 
         embeddings = self._embedding_service.embed_documents(
             [chunk.text for chunk in chunks]
@@ -118,6 +112,7 @@ class DocumentService:
             for chunk, embedding in zip(chunks, embeddings, strict=True)
         ]
         self._vector_store.replace_document(document_id, records)
+        logger.info("vector save completed document_id=%s count=%d", document_id, len(records))
 
         return DocumentProcessingResult(
             document_id=document_id,
@@ -139,6 +134,11 @@ class DocumentService:
             raise InvalidDocumentError("documentId must not be blank")
         return self._vector_store.delete_document(normalized_document_id)
 
+    def rename_document_vectors(self, document_id: str, file_name: str) -> int:
+        if not document_id.strip() or not file_name.strip():
+            raise InvalidDocumentError("documentId and fileName must not be blank")
+        return self._vector_store.rename_document(document_id.strip(), self._safe_file_name(file_name))
+
     def _validate_document(
         self,
         document: DocumentInput,
@@ -149,23 +149,13 @@ class DocumentService:
     ) -> None:
         if not document_id or not knowledge_base_id:
             raise InvalidDocumentError("documentId and knowledgeBaseId must not be blank")
-        if file_type not in _ALLOWED_CONTENT_TYPES:
-            raise UnsupportedDocumentTypeError("Only PDF and DOCX files are supported")
-        if (
-            document.content_type
-            and document.content_type.lower() not in _ALLOWED_CONTENT_TYPES[file_type]
-        ):
-            raise UnsupportedDocumentTypeError(
-                f"Content type is not valid for {file_type.upper()}"
-            )
+        if file_type not in ParserRegistry.MIME:
+            raise UnsupportedDocumentTypeError("暂不支持该文件格式")
         if not document.content:
             raise InvalidDocumentError("Uploaded document is empty")
         if len(document.content) > self._max_file_size_bytes:
             raise DocumentTooLargeError("Uploaded document exceeds the configured size limit")
-        if file_type == "pdf" and not document.content.startswith(b"%PDF-"):
-            raise InvalidDocumentError("Uploaded file does not have a valid PDF header")
-        if file_type == "docx" and not document.content.startswith(b"PK"):
-            raise InvalidDocumentError("Uploaded file does not have a valid DOCX header")
+        self._parsers.select(file_type, document.content_type, document.content)
 
     @staticmethod
     def _safe_file_name(file_name: str) -> str:
@@ -174,6 +164,6 @@ class DocumentService:
     @staticmethod
     def _file_type(file_name: str) -> str:
         extension = file_name.rsplit(".", maxsplit=1)[-1].lower()
-        if "." not in file_name or extension not in _ALLOWED_CONTENT_TYPES:
-            raise UnsupportedDocumentTypeError("Only PDF and DOCX files are supported")
+        if "." not in file_name or extension not in ParserRegistry.MIME:
+            raise UnsupportedDocumentTypeError("暂不支持该文件格式")
         return extension

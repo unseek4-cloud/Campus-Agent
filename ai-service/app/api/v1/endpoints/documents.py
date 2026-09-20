@@ -9,9 +9,19 @@ from app.core.exceptions import DocumentTooLargeError
 from app.domain.document import DocumentInput
 from app.schemas.common import ApiResponse
 from app.schemas.document import DocumentDeleteData, DocumentProcessData
+from pydantic import BaseModel
 from app.services.document_service import DocumentService
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+
+class RenameRequest(BaseModel):
+    fileName: str
+
+@router.patch("/{document_id}/name")
+async def rename_document_vectors(document_id: str, body: RenameRequest, request: Request,
+                                  document_service: DocumentService = Depends(get_document_service)):
+    count = await run_in_threadpool(document_service.rename_document_vectors, document_id, body.fileName)
+    return ApiResponse.success({"documentId": document_id, "updatedVectorCount": count}, request.state.request_id)
 
 
 @router.post(
@@ -25,7 +35,7 @@ async def process_document(
     knowledge_base_id: Annotated[
         str, Form(alias="knowledgeBaseId", min_length=1, max_length=128)
     ],
-    file: Annotated[UploadFile, File(description="PDF or DOCX document")],
+    file: Annotated[UploadFile, File(description="Supported campus document")],
     settings: Settings = Depends(get_settings),
     document_service: DocumentService = Depends(get_document_service),
 ) -> ApiResponse[DocumentProcessData]:
