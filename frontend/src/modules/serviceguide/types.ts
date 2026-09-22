@@ -36,3 +36,22 @@ export interface ServiceStep {
 }
 export interface ServiceSource { title: string | null; documentId: string | null; publishTime: string | null; url: string | null }
 export interface ServiceDetail { service: ServiceItem; steps: ServiceStep[] }
+
+/** User confirmations are separate from the school-defined ServiceStep records. */
+export interface ServiceProgress {
+  serviceCode: string
+  serviceId: number | null
+  serviceVersion: number
+  currentStep: number | null
+  completedSteps: number[]
+  checkedMaterials: string[]
+  completed: boolean
+  updatedAt: string
+}
+
+/** Replace this adapter with an account API in V1.2 without changing step logic. */
+export interface ServiceProgressStorage {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+  removeItem(key: string): void
+}

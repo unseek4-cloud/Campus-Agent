@@ -127,6 +127,7 @@ function clearConversation(): void {
             v-if="message.response?.type === 'SERVICE_GUIDE' && message.response.service"
             :service="message.response.service" :steps="message.response.steps ?? []"
             :source="message.response.source" :current-step="message.response.currentStep"
+            track-progress
           />
           <div v-if="message.response?.sources.length" class="message-sources">
             <strong>参考来源</strong>
