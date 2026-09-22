@@ -1,5 +1,7 @@
 # CampusAgent AI Service
 
+办事引导 V1 新增 `/internal/v1/service-guide/recognize`、`/internal/v1/service-guide/narrate`。复用既有 LLM、检索、过滤与 Context；不访问 MySQL。结构化事实由 Java 传入，AI 仅在目录中识别事项、选择可校验的原文补充；示例流程不混用真实政策。异常由 Java 降级为数据库流程。原 `/internal/v1/rag/chat` 保持原实现，详见 [V1 说明](../docs/service-guide-v1.md)。
+
 包含知识库入库、检索和 RAG 问答能力：普通/扫描 PDF 和 DOCX 文本提取、清洗、切块、Embedding、Chroma 向量持久化、TopK 相似度召回、本地 CrossEncoder 重排和千问答案生成。扫描页优先使用 Qwen OCR，失败时由 PaddleOCR 在本地继续处理。
 
 ## 启动

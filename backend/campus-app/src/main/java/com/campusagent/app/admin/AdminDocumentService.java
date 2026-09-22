@@ -66,6 +66,14 @@ public class AdminDocumentService {
         return d;
     }
 
+    public org.springframework.core.io.Resource originalFile(String id) {
+        detail(id);
+        Path file = storage.resolve(id).normalize();
+        if (!file.startsWith(storage) || !Files.isRegularFile(file))
+            throw error("SOURCE_FILE_MISSING", "来源原文件暂不可用", HttpStatus.NOT_FOUND);
+        return new org.springframework.core.io.FileSystemResource(file);
+    }
+
     public Map<String,Object> upload(MultipartFile file) {
         String original = file.getOriginalFilename()==null ? "" : Path.of(file.getOriginalFilename().replace('\\','/')).getFileName().toString();
         String type = original.contains(".") ? original.substring(original.lastIndexOf('.')+1).toLowerCase() : "";

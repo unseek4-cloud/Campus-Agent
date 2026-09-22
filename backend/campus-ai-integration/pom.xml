@@ -4,6 +4,8 @@
     <parent><groupId>com.campusagent</groupId><artifactId>campus-backend</artifactId><version>0.1.0-SNAPSHOT</version></parent>
     <artifactId>campus-ai-integration</artifactId>
     <dependencies>
+        <dependency><groupId>com.campusagent</groupId><artifactId>campus-affair</artifactId><version>${project.version}</version></dependency>
+        <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
         <dependency>
             <groupId>com.campusagent</groupId>
             <artifactId>campus-shared</artifactId>

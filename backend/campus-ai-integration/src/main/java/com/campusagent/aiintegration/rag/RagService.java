@@ -14,6 +14,10 @@ public class RagService {
     }
 
     public RagChatResponse chat(RagChatRequest request) {
+        return client.chat(normalize(request));
+    }
+
+    public static RagChatRequest normalize(RagChatRequest request) {
         if (request == null || request.query() == null || request.query().isBlank()) {
             throw new IllegalArgumentException("query must not be blank");
         }
@@ -49,6 +53,6 @@ public class RagService {
             }
             history = normalized.isEmpty() ? null : List.copyOf(normalized);
         }
-        return client.chat(new RagChatRequest(query, knowledgeBaseId, history));
+        return new RagChatRequest(query, knowledgeBaseId, history);
     }
 }

@@ -2,6 +2,8 @@
 
 这是 Maven 多模块的 Spring Boot 模块化单体。`campus-app` 是唯一启动模块，其他模块不能自行成为 Spring Boot 应用。
 
+办事引导 V1：`campus-affair` 新增事项/步骤管理；`campus-ai-integration` 在原 `/api/rag/chat` 中进行识别与分流，未命中仍使用原 RAG。新增 `/api/services`、`/api/admin/services`；启动时自动执行幂等 V3 建表，示例数据单独导入。完整说明见 [开发与验收文档](../docs/service-guide-v1.md)。从仓库根目录执行 `scripts/start-backend.ps1 -Build` 可读取 backend/.env 并构建启动。
+
 ## 构建与启动
 
 ```bash

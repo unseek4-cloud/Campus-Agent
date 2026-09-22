@@ -28,12 +28,24 @@ from app.services.rerank_service import RerankService
 from app.services.retrieval_service import RetrievalService
 from app.services.context_builder import ContextBuilder
 from app.services.rag_service import RagService
+from app.services.service_guide_service import ServiceGuideAiService
 from app.services.result_filter import RerankResultFilter
 from app.services.temporal_evidence_service import TemporalEvidenceService
 from app.services.text_cleaner import TextCleaner
 from app.vector_store.chroma_store import ChromaVectorStore
 
 _AI_SERVICE_ROOT = Path(__file__).resolve().parents[2]
+
+
+@lru_cache
+def get_service_guide_ai_service() -> ServiceGuideAiService:
+    settings = get_settings()
+    return ServiceGuideAiService(
+        llm=create_llm_provider(settings), retrieval=get_retrieval_service,
+        result_filter=RerankResultFilter(settings.rag_min_rerank_score, settings.rag_context_top_k,
+                                       settings.rag_min_relative_score),
+        context_builder=ContextBuilder(settings.rag_max_context_chars), top_k=settings.rag_retrieval_top_k,
+    )
 
 
 @lru_cache

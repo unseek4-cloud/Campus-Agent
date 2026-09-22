@@ -36,6 +36,12 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error("DOCUMENT_TOO_LARGE", "文件超过大小限制"));
     }
 
+    @ExceptionHandler({org.springframework.http.converter.HttpMessageNotReadableException.class,
+            org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class})
+    public ResponseEntity<ApiResponse<Void>> handleInvalidRequest() {
+        return ResponseEntity.badRequest().body(ApiResponse.error("INVALID_ARGUMENT", "请求格式或参数无效，请检查后重试"));
+    }
+
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<ApiResponse<Void>> handleNoResourceFoundException() {
         return ResponseEntity

@@ -5,6 +5,7 @@ spring:
   sql:
     init:
       mode: always
+      schema-locations: classpath:schema.sql,classpath:db/migration/V3__service_guide.sql
   servlet:
     multipart:
       max-file-size: ${ADMIN_MAX_UPLOAD_SIZE_MB:20}MB
@@ -21,6 +22,8 @@ app:
   version: 0.1.0-SNAPSHOT
 
 campus:
+  service-guide:
+    ai-timeout-seconds: ${SERVICE_GUIDE_AI_TIMEOUT_SECONDS:12}
   admin:
     max-upload-size-mb: ${ADMIN_MAX_UPLOAD_SIZE_MB:20}
     storage-path: ${ADMIN_DOCUMENT_STORAGE_PATH:var/documents}

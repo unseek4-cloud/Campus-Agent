@@ -1,3 +1,5 @@
+import type { ServiceItem, ServiceStep, ServiceSource } from '../serviceguide/types'
+
 export interface ApiResponse<T> {
   code: string
   message: string
@@ -56,6 +58,12 @@ export interface RagSource {
 }
 
 export interface RagChatResponse {
+  type: 'QA' | 'SERVICE_GUIDE'
+  service?: ServiceItem | null
+  steps?: ServiceStep[]
+  source?: ServiceSource | null
+  currentStep?: number | null
+  aiEnhanced?: boolean
   answer: string
   sources: RagSource[]
   retrievalCount: number

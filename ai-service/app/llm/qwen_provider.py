@@ -66,3 +66,4 @@ class QwenProvider(LlmProvider):
 
         except (ValueError, KeyError, IndexError, TypeError) as exception:
             raise LlmProviderError("Qwen API returned an invalid response") from exception
+        #以上为异常处理，进行了各种异常的捕获和处理，确保在调用Qwen API时能够正确处理不同类型的错误情况

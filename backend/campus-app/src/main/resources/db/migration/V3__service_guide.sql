@@ -1,0 +1,47 @@
+-- Additive and repeatable. Uses the existing knowledge_document UUID and database collation.
+CREATE TABLE IF NOT EXISTS service_item (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    code VARCHAR(80) NOT NULL,
+    name VARCHAR(120) NOT NULL,
+    category VARCHAR(80) NOT NULL,
+    description TEXT NULL,
+    department VARCHAR(255) NULL,
+    location VARCHAR(500) NULL,
+    office_hours VARCHAR(255) NULL,
+    contact VARCHAR(255) NULL,
+    requirements JSON NOT NULL,
+    materials JSON NOT NULL,
+    recognition_rules JSON NOT NULL,
+    deadline VARCHAR(500) NULL,
+    source_document_id VARCHAR(36) NULL,
+    source_title VARCHAR(255) NULL,
+    source_url VARCHAR(2000) NULL,
+    source_publish_time DATE NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'DRAFT',
+    is_example BOOLEAN NOT NULL DEFAULT FALSE,
+    version INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT uk_service_code UNIQUE (code),
+    CONSTRAINT fk_service_document FOREIGN KEY (source_document_id) REFERENCES knowledge_document(id) ON DELETE SET NULL,
+    CONSTRAINT ck_service_status CHECK (status IN ('DRAFT','ACTIVE','DISABLED')),
+    KEY idx_service_status_category (status, category),
+    KEY idx_service_updated (updated_at)
+);
+
+CREATE TABLE IF NOT EXISTS service_step (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    service_item_id BIGINT NOT NULL,
+    step_order INT NOT NULL,
+    title VARCHAR(160) NOT NULL,
+    description TEXT NULL,
+    responsible_department VARCHAR(255) NULL,
+    required_materials JSON NOT NULL,
+    location VARCHAR(500) NULL,
+    estimated_time VARCHAR(255) NULL,
+    created_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    updated_at TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+    CONSTRAINT uk_service_step_order UNIQUE (service_item_id, step_order),
+    CONSTRAINT fk_step_service FOREIGN KEY (service_item_id) REFERENCES service_item(id) ON DELETE CASCADE,
+    CONSTRAINT ck_step_order CHECK (step_order > 0)
+);

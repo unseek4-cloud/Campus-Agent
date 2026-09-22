@@ -4,6 +4,12 @@ CampusAgent 是面向高校学生的事务智能问答与办事引导系统。�
 
 本项目目前由AIC  海底小纵队 队伍负责开发与维护
 
+## 智能办事流程引导 V1
+
+新增结构化办事引导及管理员事项管理。学生端继续使用 `/api/rag/chat`，识别到事项时展示条件、材料、步骤与来源卡片，未命中继续原 RAG；AI 离线也能返回数据库流程。管理员入口为 `/admin/services`。五项示例需显式导入 SQL，均标记为测试数据，不代表学校政策。
+
+数据库升级、Windows 启动、API、测试问题、文件清单及功能边界见 [办事流程 V1 开发与验收说明](docs/service-guide-v1.md)。可用 `scripts/start-backend.ps1` 读取既有 `backend/.env` 启动 Java。
+
 ## 项目结构
 
 ```text

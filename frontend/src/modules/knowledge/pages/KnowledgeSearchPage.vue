@@ -2,6 +2,7 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { computed, ref } from 'vue'
+import ServiceGuideCard from '../../serviceguide/components/ServiceGuideCard.vue'
 
 import { chatWithKnowledge, searchKnowledge } from '../api'
 import type { ApiResponse, ConversationMessage, KnowledgeSearchResult, RagChatResponse } from '../types'
@@ -122,6 +123,11 @@ function clearConversation(): void {
         >
           <div class="message-label">{{ message.role === 'user' ? '你' : 'CampusAgent' }}</div>
           <p class="message-content">{{ message.content }}</p>
+          <ServiceGuideCard
+            v-if="message.response?.type === 'SERVICE_GUIDE' && message.response.service"
+            :service="message.response.service" :steps="message.response.steps ?? []"
+            :source="message.response.source" :current-step="message.response.currentStep"
+          />
           <div v-if="message.response?.sources.length" class="message-sources">
             <strong>参考来源</strong>
             <div
@@ -320,7 +326,8 @@ function clearConversation(): void {
 .conversation-heading h2 { margin: 0; font-size: 20px; }
 .chat-message { max-width: 86%; padding: 16px 20px; border: 1px solid #dfe4ec; border-radius: 14px; background: #fff; }
 .user-message { justify-self: end; background: #ecf5ff; border-color: #c6e2ff; }
-.assistant-message { justify-self: start; }
+.assistant-message { justify-self: start; min-width: 0; }
+.assistant-message:has(.service-guide) { width: 100%; }
 .message-label { color: #606266; font-size: 13px; font-weight: 600; }
 .message-content { margin: 8px 0 0; color: #303133; white-space: pre-wrap; line-height: 1.8; overflow-wrap: anywhere; }
 .message-sources { margin-top: 18px; padding-top: 12px; border-top: 1px solid #e4e7ed; font-size: 14px; }
