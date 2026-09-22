@@ -29,7 +29,7 @@ class ChatServiceTest {
                 new ServiceItemDTO.RecognitionRules(List.of("学生证"), List.of("丢"), List.of()),
                 null, null, "测试数据", null, null, "ACTIVE", true, 0, null, null);
         guide = new ServiceDetail(item, List.of(new ServiceStepDTO(1L, 1, "准备材料", null, null, List.of(), null, null)));
-        when(recognizer.recognize(anyString())).thenReturn(new ServiceRecognitionResponse(true, "CARD", "学生证补办", 0.93));
+        when(recognizer.recognize(anyString())).thenReturn(new ServiceRecognitionResponse(true, "CARD", "学生证补办", 0.93, QueryIntent.SERVICE_GUIDE));
         when(guides.activeByCode("CARD")).thenReturn(guide);
     }
     @Test void offlineAiStillReturnsCompleteStructuredWorkflow() {

@@ -23,12 +23,13 @@ public class ChatService {
     public ChatResponse chat(RagChatRequest raw) {
         var request = RagService.normalize(raw);
         var intent = recognizer.recognize(request.query());
-        if (!intent.matched()) return ChatResponse.qa(rag.chat(request));
+        if (!intent.matched() || intent.queryIntent() != QueryIntent.SERVICE_GUIDE)
+            return ChatResponse.qa(rag.chat(request), intent);
         ServiceDetail guide;
         try { guide = guides.activeByCode(intent.serviceCode()); }
         catch (BusinessException e) {
             if (!"SERVICE_NOT_FOUND".equals(e.getCode())) throw e;
-            return new ChatResponse("SERVICE_GUIDE", e.getMessage(), List.of(), 0, 0, 0, request.query(), null, List.of(), null, null, false);
+            return new ChatResponse("SERVICE_GUIDE", e.getMessage(), List.of(), 0, 0, 0, request.query(), null, List.of(), null, null, false, QueryIntent.SERVICE_GUIDE, null);
         }
         log.info("[ServiceGuide] serviceItemId={}", guide.service().id());
         String fallback = fallback(guide);
@@ -43,7 +44,7 @@ public class ChatService {
         return new ChatResponse("SERVICE_GUIDE", answer, narration == null ? List.of() : narration.sources(),
                 narration == null ? 0 : narration.retrievalCount(), narration == null ? 0 : narration.rerankCount(),
                 narration == null ? 0 : narration.usedContextCount(), request.query(), s, guide.steps(), source,
-                guide.steps().isEmpty() ? 0 : 1, narration != null);
+                guide.steps().isEmpty() ? 0 : 1, narration != null, QueryIntent.SERVICE_GUIDE, null);
     }
     static String fallback(ServiceDetail guide) {
         String materials = guide.service().materials().stream().map(ServiceItemDTO.Material::name).collect(Collectors.joining("、"));

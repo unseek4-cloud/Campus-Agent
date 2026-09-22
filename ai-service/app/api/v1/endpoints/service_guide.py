@@ -4,13 +4,13 @@ from starlette.concurrency import run_in_threadpool
 from app.core.dependencies import get_service_guide_ai_service
 from app.schemas.common import ApiResponse
 from app.schemas.rag import RagChatData, RagSourceData
-from app.schemas.service_guide import NarrationRequest, RecognitionRequest
+from app.schemas.service_guide import NarrationRequest, RecognitionRequest, RecognitionResponse
 from app.services.service_guide_service import ServiceGuideAiService
 
 router = APIRouter(prefix="/service-guide", tags=["service-guide"])
 
 
-@router.post("/recognize")
+@router.post("/recognize", response_model=ApiResponse[RecognitionResponse], response_model_exclude_none=True)
 async def recognize(payload: RecognitionRequest, request: Request,
                     service: ServiceGuideAiService = Depends(get_service_guide_ai_service)):
     result = await run_in_threadpool(service.recognize, payload)

@@ -60,9 +60,9 @@ class ServiceGuideTest {
         assertFalse(recognizer.recognize("我想申请其他事项").matched());
     }
     @Test void inventedCodeAndLowConfidenceAreRejected() {
-        when(semantic.match(anyString(), anyList())).thenReturn(new ServiceRecognitionResponse(true, "UNKNOWN", "假名称", 0.99));
+        when(semantic.match(anyString(), anyList())).thenReturn(new ServiceRecognitionResponse(true, "UNKNOWN", "假名称", 0.99, QueryIntent.SERVICE_GUIDE));
         assertFalse(recognizer.recognize("我要办理其他手续").matched());
-        when(semantic.match(anyString(), anyList())).thenReturn(new ServiceRecognitionResponse(true, "DORM_REPAIR", "假名称", 0.4));
+        when(semantic.match(anyString(), anyList())).thenReturn(new ServiceRecognitionResponse(true, "DORM_REPAIR", "假名称", 0.4, QueryIntent.SERVICE_GUIDE));
         assertFalse(recognizer.recognize("我要办理其他手续").matched());
     }
     @Test void ambiguousAndNegatedRequestsDoNotTakeFirstRule() {

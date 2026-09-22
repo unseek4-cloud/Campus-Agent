@@ -1,3 +1,5 @@
+from enum import Enum
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.rag import RagChatRequest
@@ -11,6 +13,23 @@ class Candidate(BaseModel):
 
 class RecognitionRequest(RagChatRequest):
     candidates: list[Candidate] = Field(max_length=500)
+
+
+class QueryIntent(str, Enum):
+    GENERAL_QA = "GENERAL_QA"
+    POLICY_QA = "POLICY_QA"
+    ELIGIBILITY_QA = "ELIGIBILITY_QA"
+    SERVICE_GUIDE = "SERVICE_GUIDE"
+
+
+class RecognitionResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    matched: bool = Field(default=False, strict=True)
+    service_code: str | None = Field(default=None, alias="serviceCode")
+    service_name: str | None = Field(default=None, alias="serviceName")
+    confidence: float | None = Field(default=None, ge=0.85, le=1, strict=True)
+    # Older/missing model fields must never imply a workflow.
+    query_intent: QueryIntent = Field(default=QueryIntent.GENERAL_QA, alias="queryIntent")
 
 
 class Material(BaseModel):

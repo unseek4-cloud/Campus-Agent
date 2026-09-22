@@ -19,7 +19,7 @@ def test_service_guide_endpoints_use_existing_envelope():
                 "service": {"code": "CARD", "name": "补办"}, "steps": []}})
             blank = client.post("/internal/v1/service-guide/recognize", json={"query": " ", "candidates": []})
         assert recognition.status_code == 200
-        assert recognition.json()["data"] == {"matched": False}
+        assert recognition.json()["data"] == {"matched": False, "queryIntent": "GENERAL_QA"}
         assert narration.status_code == 200
         assert narration.json()["data"]["sources"] == []
         assert narration.json()["data"]["usedContextCount"] == 0

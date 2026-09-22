@@ -59,6 +59,8 @@ export interface RagSource {
 
 export interface RagChatResponse {
   type: 'QA' | 'SERVICE_GUIDE'
+  queryIntent?: 'GENERAL_QA' | 'POLICY_QA' | 'ELIGIBILITY_QA' | 'SERVICE_GUIDE'
+  relatedService?: { code: string; name: string } | null
   service?: ServiceItem | null
   steps?: ServiceStep[]
   source?: ServiceSource | null

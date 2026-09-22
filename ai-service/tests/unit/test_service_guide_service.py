@@ -66,7 +66,7 @@ def test_example_and_recognition_do_not_initialize_retrieval():
     def unavailable_factory():
         raise AssertionError("Vector store must not be initialized")
     service.retrieval = unavailable_factory
-    assert service.recognize(RecognitionRequest(query="怎么办", candidates=[])) == {"matched": False}
+    assert service.recognize(RecognitionRequest(query="怎么办", candidates=[])) == {"matched": False, "queryIntent": "GENERAL_QA"}
     assert "准备材料" in service.narrate(request(example=True)).answer
 
 
@@ -93,10 +93,45 @@ def test_provider_failure_propagates_for_java_fallback():
 def test_semantic_recognition_rejects_unknown_or_uncertain_codes(output):
     service = build_service(output)
     payload = RecognitionRequest(query="我的证件找不着了怎么处理", candidates=[{"code": "STUDENT_CARD_REISSUE", "name": "学生证补办"}])
-    assert service.recognize(payload) == {"matched": False}
+    assert service.recognize(payload) == {"matched": False, "queryIntent": "GENERAL_QA"}
 
 
 def test_semantic_recognition_accepts_catalog_code_and_replaces_model_name():
     service = build_service('{"matched":true,"serviceCode":"STUDENT_CARD_REISSUE","serviceName":"假名称","confidence":0.91}')
     payload = RecognitionRequest(query="我的证件找不着了怎么处理", candidates=[{"code": "STUDENT_CARD_REISSUE", "name": "学生证补办"}])
     assert service.recognize(payload)["serviceName"] == "学生证补办"
+
+
+@pytest.mark.parametrize("intent", ["GENERAL_QA", "POLICY_QA", "ELIGIBILITY_QA", "SERVICE_GUIDE"])
+def test_semantic_query_intent_is_independent_of_matched_service(intent):
+    service = build_service(json.dumps({"matched": True, "serviceCode": "CARD", "confidence": 0.95, "queryIntent": intent}))
+    result = service.recognize(RecognitionRequest(query="学生证的问题", candidates=[{"code": "CARD", "name": "学生证补办"}]))
+    assert result == {"matched": True, "serviceCode": "CARD", "serviceName": "学生证补办", "confidence": 0.95, "queryIntent": intent}
+    service.retrieval.search_with_counts.assert_not_called()
+
+
+@pytest.mark.parametrize("overrides", [
+    {"queryIntent": "CUSTOM_GUIDE"}, {"queryIntent": None}, {"queryIntent": 1},
+    {"queryIntent": "service_guide"}, {"confidence": True}, {"confidence": "0.95"},
+    {"confidence": float("nan")}, {"confidence": float("inf")}, {"matched": "true"},
+])
+def test_invalid_structured_intent_falls_back_to_stable_qa_enum(overrides):
+    output = {"matched": True, "serviceCode": "CARD", "confidence": 0.95, "queryIntent": "SERVICE_GUIDE"} | overrides
+    service = build_service(json.dumps(output))
+    result = service.recognize(RecognitionRequest(query="补办证件", candidates=[{"code": "CARD", "name": "学生证补办"}]))
+    assert result == {"matched": False, "queryIntent": "GENERAL_QA"}
+
+
+def test_model_type_cannot_authorize_guide_when_query_intent_missing():
+    service = build_service('{"matched":true,"serviceCode":"CARD","confidence":0.95,"type":"SERVICE_GUIDE"}')
+    result = service.recognize(RecognitionRequest(query="学生证", candidates=[{"code": "CARD", "name": "学生证补办"}]))
+    assert result["matched"] is True
+    assert result["queryIntent"] == "GENERAL_QA"
+    assert "type" not in result
+
+
+def test_recognition_provider_timeout_is_safe_qa():
+    service = build_service()
+    service.llm.generate.side_effect = LlmTimeoutError("offline")
+    result = service.recognize(RecognitionRequest(query="学生证", candidates=[{"code": "CARD", "name": "学生证補办"}]))
+    assert result == {"matched": False, "queryIntent": "GENERAL_QA"}

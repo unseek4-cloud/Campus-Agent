@@ -123,6 +123,7 @@ function clearConversation(): void {
         >
           <div class="message-label">{{ message.role === 'user' ? '你' : 'CampusAgent' }}</div>
           <p class="message-content">{{ message.content }}</p>
+          <!-- A related topic (or stray guide fields on QA) must never mount progress tracking. -->
           <ServiceGuideCard
             v-if="message.response?.type === 'SERVICE_GUIDE' && message.response.service"
             :service="message.response.service" :steps="message.response.steps ?? []"
