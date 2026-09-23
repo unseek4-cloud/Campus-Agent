@@ -54,4 +54,10 @@ RAG 问答：`POST /api/rag/chat`，请求 `{"query":"心理测评时间是什�
 | POST | `/api/admin/documents/{id}/reprocess` | 后台重新解析同一文档 |
 | DELETE | `/api/admin/documents/{id}` | 删除向量、原文件、元数据 |
 
-上传响应 `data` 为 `{ "duplicate": false, "taskId": "文档ID", "documentId": "文档ID", "status": "PROCESSING", "document": {...} }`，保存文件后即返回；重复文件返回 `duplicate: true` 和已存在文档，不重复生成向量。后台最多同时处理 2 份文档，等待队列上限 16。`status` 保持旧接口的 `PROCESSING` / `SUCCESS` / `FAILED`，`parseStatus` 给出更细的阶段。前端每 1.5 秒轮询进度。失败详情仅显示友好提示，异常堆栈留在日志。已有数据库升级前须执行 [V2 迁移 SQL](campus-app/src/main/resources/db/migration/V2__document_ocr_progress.sql)；新数据库由 `schema.sql` 建表。当前项目没有账号系统，正式部署前须给 `/api/admin/**` 增加管理员认证与授权。
+上传响应 `data` 为 `{ "duplicate": false, "taskId": "文档ID", "documentId": "文档ID", "status": "PROCESSING", "document": {...} }`，保存文件后即返回；重复文件返回 `duplicate: true` 和已存在文档，不重复生成向量。后台最多同时处理 2 份文档，等待队列上限 16。`status` 保持旧接口的 `PROCESSING` / `SUCCESS` / `FAILED`，`parseStatus` 给出更细的阶段。前端每 1.5 秒轮询进度。失败详情仅显示友好提示，异常堆栈留在日志。已有数据库升级前须执行 [V2 迁移 SQL](campus-app/src/main/resources/db/migration/V2__document_ocr_progress.sql)；新数据库由 `schema.sql` 建表。`/api/admin/**` 已通过 Spring Security HTTP Basic + CSRF 保护；配置 `ADMIN_USERNAME / ADMIN_PASSWORD`，先调用 `/api/admin/session` 获取 CSRF token 与会话 Cookie，再执行管理变更。未配置管理员凭据时拒绝管理访问。
+
+## 材料附件
+
+任意事项的每项材料可关联一个模板附件，V4 在启动时自动建表；原材料 JSON 保持兼容。默认存储目录为 `ADMIN_DOCUMENT_STORAGE_PATH/materials`，可配置 `MATERIAL_UPLOAD_DIR`。支持 DOC / DOCX / PDF / XLS / XLSX / ZIP，复用单文件大小限制（默认 20 MB），不进入知识库解析。
+
+数据库迁移、完整 API、权限配置、启动与验收见 [材料附件说明](../docs/material-attachments.md)。

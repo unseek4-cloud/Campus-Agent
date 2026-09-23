@@ -16,7 +16,6 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -37,7 +36,7 @@ public class AdminDocumentService {
     private static final Set<String> TYPES = Set.of("pdf","docx","txt","md","xlsx","pptx","png","jpg","jpeg");
     private final DocumentRepository repository;
     private final DocumentAiClient ai;
-    private final Path storage;
+    private final com.campusagent.shared.storage.LocalFileStorage storage;
     private final String kb;
     private final long maxBytes;
     private final ThreadPoolExecutor workers = new ThreadPoolExecutor(2, 2, 0, TimeUnit.SECONDS,
@@ -47,7 +46,7 @@ public class AdminDocumentService {
             @Value("${campus.admin.storage-path}") String storagePath,
             @Value("${campus.admin.knowledge-base-id}") String knowledgeBaseId,
             @Value("${campus.admin.max-upload-size-mb}") long maxMb) {
-        this.repository=repository; this.ai=ai; this.storage=Path.of(storagePath).toAbsolutePath().normalize();
+        this.repository=repository; this.ai=ai; this.storage=new com.campusagent.shared.storage.LocalFileStorage(storagePath);
         this.kb=knowledgeBaseId; this.maxBytes=maxMb*1024*1024;
     }
 
@@ -68,10 +67,7 @@ public class AdminDocumentService {
 
     public org.springframework.core.io.Resource originalFile(String id) {
         detail(id);
-        Path file = storage.resolve(id).normalize();
-        if (!file.startsWith(storage) || !Files.isRegularFile(file))
-            throw error("SOURCE_FILE_MISSING", "来源原文件暂不可用", HttpStatus.NOT_FOUND);
-        return new org.springframework.core.io.FileSystemResource(file);
+        return storage.resource(id);
     }
 
     public Map<String,Object> upload(MultipartFile file) {
@@ -93,16 +89,15 @@ public class AdminDocumentService {
             if (existing!=null) return Map.of("duplicate",true,"document",existing);
             String id=UUID.randomUUID().toString();
             DocumentRecord doc=new DocumentRecord(id,kb,original,original,type,mime,bytes.length,hash,"PROCESSING",0,null,null,null);
-            Files.createDirectories(storage);
-            Files.write(storage.resolve(id),bytes);
+            storage.write(id,bytes);
             try { repository.insert(doc); }
             catch (DataIntegrityViolationException race) {
-                Files.deleteIfExists(storage.resolve(id));
+                storage.delete(id);
                 DocumentRecord duplicate=repository.duplicate(kb,hash);
                 if (duplicate!=null) return Map.of("duplicate",true,"document",duplicate);
                 throw race;
             } catch (RuntimeException databaseFailure) {
-                Files.deleteIfExists(storage.resolve(id));
+                storage.delete(id);
                 throw databaseFailure;
             }
             enqueue(id);
@@ -125,7 +120,7 @@ public class AdminDocumentService {
         long started = System.nanoTime();
         try {
             DocumentRecord doc = detail(id);
-            byte[] bytes = Files.readAllBytes(storage.resolve(id));
+            byte[] bytes = storage.read(id);
             log.info("document parsing started id={} parser={}", id, doc.fileType());
             DocumentAiClient.ProcessResult result = ai.process(doc, bytes);
             repository.processed(id, result);
@@ -210,7 +205,7 @@ public class AdminDocumentService {
     public void delete(String id) {
         if (detail(id).status().equals("PROCESSING")) throw error("DOCUMENT_BUSY","文档正在处理，请稍后操作",HttpStatus.CONFLICT);
         ai.deleteVectors(id);
-        try { Files.deleteIfExists(storage.resolve(id)); }
+        try { storage.delete(id); }
         catch (IOException exception) { throw error("DELETE_FAILED","原文件删除失败，请稍后重试",HttpStatus.INTERNAL_SERVER_ERROR); }
         repository.delete(id);
         log.info("document deleted id={}",id);
@@ -219,7 +214,7 @@ public class AdminDocumentService {
     public DocumentRecord reprocess(String id) {
         DocumentRecord doc=detail(id);
         if (doc.status().equals("PROCESSING")) throw error("DOCUMENT_BUSY","文档正在处理，请稍后操作",HttpStatus.CONFLICT);
-        if (!Files.exists(storage.resolve(id))) throw error("SOURCE_FILE_MISSING","原文件不存在，无法重新解析",HttpStatus.CONFLICT);
+        if (!storage.exists(id)) throw error("SOURCE_FILE_MISSING","原文件不存在，无法重新解析",HttpStatus.CONFLICT);
         log.info("document reprocess started id={}",id);
         repository.processing(id);
         enqueue(id);

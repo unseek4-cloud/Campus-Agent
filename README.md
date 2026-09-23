@@ -18,6 +18,12 @@ CampusAgent 是面向高校学生的事务智能问答与办事引导系统。�
 
 查询意图与事项匹配的分离、自动测试、真实浏览器验收和逐步启动说明见 [查询意图路由修复](docs/query-intent-routing.md)。
 
+## 所需材料附件 / 表格模板下载
+
+管理员可在 `/admin/services` 编辑任意事项，为每项材料上传、下载、替换或删除一个可选附件；学生卡片按后台数据展示蓝色下载链接，保留中文文件名。支持 DOC、DOCX、PDF、XLS、XLSX、ZIP，默认 20 MB，复用 UUID 文件存储，不进入 RAG。
+
+启动自动执行 V4 增量迁移；完整文件清单、数据库 / API、存储配置、认证、启动命令及手动验收见 [材料附件开发与验收说明](docs/material-attachments.md)。
+
 ## 项目结构
 
 ```text
@@ -165,7 +171,7 @@ Java 公共接口 `POST /api/rag/chat` 的多轮请求示例：
 
 ## 管理员知识库
 
-启动三个服务后访问 [管理员端](http://localhost:5173/admin)。`/admin` 展示真实文档统计和最近上传，`/admin/knowledge` 提供搜索、类型与状态筛选、分页、批量上传、详情、重命名、重新解析和删除。Swagger 与 Python OpenAPI 继续用于开发调试；日常知识库管理请使用管理员页面。本阶段尚无登录系统，**正式部署前必须接入管理员认证并限制 `/api/admin/**`**，切勿将当前接口直接开放到公网。
+启动三个服务后访问 [管理员端](http://localhost:5173/admin)。`/admin` 展示真实文档统计和最近上传，`/admin/knowledge` 提供搜索、类型与状态筛选、分页、批量上传、详情、重命名、重新解析和删除。Swagger 与 Python OpenAPI 继续用于开发调试；日常知识库管理请使用管理员页面。管理员接口现在使用 Spring Security HTTP Basic 与 CSRF 保护；在 `backend/.env` 配置 `ADMIN_USERNAME / ADMIN_PASSWORD` 后进入管理员页面验证，未配置凭据时拒绝管理访问。生产部署使用 HTTPS。
 
 上传支持 PDF、DOCX、TXT、Markdown、XLSX、PPTX、PNG、JPG/JPEG；不支持 DOC/XLS/PPT 等旧版 Office 格式。默认单文件上限 20 MB，由 Java 的 `ADMIN_MAX_UPLOAD_SIZE_MB` 配置，Python 的 `AI_MAX_PDF_SIZE_MB` 应设为相同或更高。前端从 Java 配置接口读取上限；Java 与 Python 均校验文件类型和内容。TXT/Markdown 使用 UTF-8；PDF 保留现有文本层与扫描页 OCR；DOCX 保留现有解析器；XLSX 按工作表提取表头和行；PPTX 按幻灯片提取文字及页码；图片也使用 OCRManager。所有格式复用同一清洗、Chunk、Embedding、Chroma 入库流程。
 

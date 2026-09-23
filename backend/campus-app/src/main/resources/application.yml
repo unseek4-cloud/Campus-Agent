@@ -5,11 +5,12 @@ spring:
   sql:
     init:
       mode: always
-      schema-locations: classpath:schema.sql,classpath:db/migration/V3__service_guide.sql
+      schema-locations: classpath:schema.sql,classpath:db/migration/V3__service_guide.sql,classpath:db/migration/V4__material_attachments.sql
   servlet:
     multipart:
       max-file-size: ${ADMIN_MAX_UPLOAD_SIZE_MB:20}MB
-      max-request-size: ${ADMIN_MAX_UPLOAD_SIZE_MB:20}MB
+      # Leave room for multipart headers at the configured single-file boundary (up to 100 MB).
+      max-request-size: 101MB
   application:
     name: campus-backend
   datasource:
@@ -22,9 +23,13 @@ app:
   version: 0.1.0-SNAPSHOT
 
 campus:
+  material:
+    storage-path: ${MATERIAL_UPLOAD_DIR:${campus.admin.storage-path}/materials}
   service-guide:
     ai-timeout-seconds: ${SERVICE_GUIDE_AI_TIMEOUT_SECONDS:12}
   admin:
+    username: ${ADMIN_USERNAME:}
+    password: ${ADMIN_PASSWORD:}
     max-upload-size-mb: ${ADMIN_MAX_UPLOAD_SIZE_MB:20}
     storage-path: ${ADMIN_DOCUMENT_STORAGE_PATH:var/documents}
     knowledge-base-id: ${ADMIN_KNOWLEDGE_BASE_ID:campus-default}

@@ -1,4 +1,5 @@
-export interface ServiceMaterial { name: string; description: string | null; required: boolean }
+export interface MaterialAttachment { id: string; filename: string; downloadUrl: string }
+export interface ServiceMaterial { id?: string | null; name: string; description: string | null; required: boolean; attachment?: MaterialAttachment | null }
 export interface RecognitionRules { subjects: string[]; actions: string[]; exclusions: string[] }
 export interface ServiceItem {
   id: number | null

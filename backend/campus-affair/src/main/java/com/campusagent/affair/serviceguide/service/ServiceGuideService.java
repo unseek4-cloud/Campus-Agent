@@ -16,7 +16,10 @@ import java.util.Set;
 public class ServiceGuideService {
     private final ServiceItemRepository items;
     private final ServiceStepRepository steps;
-    public ServiceGuideService(ServiceItemRepository items, ServiceStepRepository steps) { this.items = items; this.steps = steps; }
+    private final MaterialAttachmentService attachments;
+    public ServiceGuideService(ServiceItemRepository items, ServiceStepRepository steps, MaterialAttachmentService attachments) {
+        this.items = items; this.steps = steps; this.attachments = attachments;
+    }
     public List<ServiceItemDTO> list(boolean activeOnly) { return items.list(activeOnly); }
     @Transactional(readOnly = true)
     public ServiceDetail detail(long id, boolean activeOnly) {
@@ -33,10 +36,30 @@ public class ServiceGuideService {
     @Transactional
     public ServiceDetail save(Long id, ServiceDetail data) {
         validate(data);
-        if (id != null) detail(id, false);
+        var previous = id == null ? null : items.lock(id);
+        if (id != null && previous == null) throw missing();
+        var normalized = new java.util.ArrayList<ServiceItemDTO.Material>();
+        var seen = new java.util.HashSet<String>();
+        for (var m : data.service().materials()) {
+            String materialId = m.id();
+            if (materialId == null && previous != null) {
+                var matches = previous.materials().stream().filter(old -> old.name().equals(m.name())).toList();
+                if (matches.size() == 1) materialId = matches.getFirst().id();
+            }
+            if (materialId == null) materialId = java.util.UUID.randomUUID().toString();
+            else {
+                String candidate = materialId;
+                if (previous == null || previous.materials().stream().noneMatch(old -> old.id().equals(candidate)))
+                    invalid("材料 ID 不属于当前事项，请刷新后重试");
+            }
+            if (!seen.add(materialId)) invalid("材料 ID 重复");
+            normalized.add(new ServiceItemDTO.Material(materialId, m.name(), m.description(), m.required(), null));
+        }
+        data = new ServiceDetail(data.service().withMaterials(normalized), data.steps());
         try {
             if (id == null) id = items.insert(data.service());
             else if (!items.update(id, data.service())) throw conflict();
+            attachments.retain(id, seen);
             steps.replace(id, data.steps());
             return detail(id, false);
         } catch (DataIntegrityViolationException e) {
@@ -45,7 +68,8 @@ public class ServiceGuideService {
     }
     @Transactional
     public void delete(long id, int version) {
-        detail(id, false);
+        if (items.lock(id) == null) throw missing();
+        attachments.retain(id, Set.of());
         if (!items.delete(id, version)) throw conflict();
     }
     private void validate(ServiceDetail data) {

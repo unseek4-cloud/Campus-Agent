@@ -89,8 +89,9 @@ class ServiceGuideTest {
         // H2 uses VARCHAR for JSON here; production migration is separately checked in MySQL mode.
         jdbc.execute("CREATE TABLE service_item (id BIGINT AUTO_INCREMENT PRIMARY KEY,code VARCHAR(80) UNIQUE,name VARCHAR(120),category VARCHAR(80),description TEXT,department VARCHAR(255),location VARCHAR(500),office_hours VARCHAR(255),contact VARCHAR(255),requirements TEXT,materials TEXT,recognition_rules TEXT,deadline VARCHAR(500),source_document_id VARCHAR(36),source_title VARCHAR(255),source_url VARCHAR(2000),source_publish_time DATE,status VARCHAR(16),is_example BOOLEAN,version INT DEFAULT 0,created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
         jdbc.execute("CREATE TABLE service_step (id BIGINT AUTO_INCREMENT PRIMARY KEY,service_item_id BIGINT REFERENCES service_item(id) ON DELETE CASCADE,step_order INT,title VARCHAR(160),description TEXT,responsible_department VARCHAR(255),required_materials TEXT,location VARCHAR(500),estimated_time VARCHAR(255),UNIQUE(service_item_id,step_order))");
+        jdbc.execute("CREATE TABLE service_material_attachment(id CHAR(36) PRIMARY KEY,service_item_id BIGINT REFERENCES service_item(id) ON DELETE CASCADE,material_id CHAR(36),original_filename VARCHAR(255),content_type VARCHAR(160),file_size BIGINT,UNIQUE(service_item_id,material_id))");
         var json = new ObjectMapper();
-        var service = new ServiceGuideService(new ServiceItemRepository(jdbc, json), new ServiceStepRepository(jdbc, json));
+        var service = new ServiceGuideService(new ServiceItemRepository(jdbc, json, new MaterialAttachmentRepository(jdbc)), new ServiceStepRepository(jdbc, json), mock(MaterialAttachmentService.class));
         var original = item("CARD", "测试事项", List.of("学生证"), List.of("补办"));
         var second = new ServiceStepDTO(null, 19, "提交", null, null, List.of(), null, null);
         var first = new ServiceStepDTO(null, 8, "准备", null, null, List.of("申请表"), null, null);

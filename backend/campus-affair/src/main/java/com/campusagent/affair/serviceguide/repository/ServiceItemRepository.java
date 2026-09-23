@@ -16,14 +16,17 @@ import java.util.List;
 public class ServiceItemRepository {
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
-    public ServiceItemRepository(JdbcTemplate jdbc, ObjectMapper json) { this.jdbc = jdbc; this.json = json; }
+    private final MaterialAttachmentRepository attachments;
+    public ServiceItemRepository(JdbcTemplate jdbc, ObjectMapper json, MaterialAttachmentRepository attachments) {
+        this.jdbc = jdbc; this.json = json; this.attachments = attachments;
+    }
 
     private RowMapper<ServiceItemDTO> mapper() {
         return (r, n) -> new ServiceItemDTO(r.getLong("id"), r.getString("code"), r.getString("name"),
                 r.getString("category"), r.getString("description"), r.getString("department"),
                 r.getString("location"), r.getString("office_hours"), r.getString("contact"),
                 read(r.getString("requirements"), new TypeReference<List<String>>() {}),
-                read(r.getString("materials"), new TypeReference<List<Material>>() {}),
+                materials(r.getLong("id"), r.getString("materials")),
                 read(r.getString("recognition_rules"), new TypeReference<RecognitionRules>() {}),
                 r.getString("deadline"), r.getString("source_document_id"), r.getString("source_title"),
                 r.getString("source_url"), r.getDate("source_publish_time") == null ? null : r.getDate("source_publish_time").toLocalDate(),
@@ -31,6 +34,30 @@ public class ServiceItemRepository {
                 r.getTimestamp("created_at").toLocalDateTime(), r.getTimestamp("updated_at").toLocalDateTime());
     }
 
+    private List<Material> materials(long serviceId, String stored) {
+        List<Material> materials = read(stored, new TypeReference<List<Material>>() {});
+        var files = attachments.list(serviceId).stream().collect(java.util.stream.Collectors.toMap(
+                MaterialAttachmentRepository.Attachment::materialId, MaterialAttachmentRepository.Attachment::dto));
+        var result = new java.util.ArrayList<Material>();
+        for (int i = 0; i < materials.size(); i++) {
+            var m = materials.get(i);
+            String id = m.id() == null ? java.util.UUID.nameUUIDFromBytes(("material:" + serviceId + ":" + i)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString() : m.id();
+            result.add(new Material(id, m.name(), m.description(), m.required(), files.get(id)));
+        }
+        return result;
+    }
+    public ServiceItemDTO lock(long id) {
+        // All definition and attachment mutations lock the same parent row.
+        jdbc.queryForList("SELECT id FROM service_item WHERE id=? FOR UPDATE", id);
+        return find(id);
+    }
+    public void persistMaterialIds(ServiceItemDTO item) {
+        jdbc.update("UPDATE service_item SET materials=? WHERE id=?", writeMaterials(item.materials()), item.id());
+    }
+    private String writeMaterials(List<Material> materials) {
+        return write(materials.stream().map(m -> new Material(m.id(), m.name(), m.description(), m.required(), null)).toList());
+    }
     public List<ServiceItemDTO> list(boolean activeOnly) {
         return jdbc.query("SELECT * FROM service_item" + (activeOnly ? " WHERE status='ACTIVE'" : "") + " ORDER BY id", mapper());
     }
@@ -42,7 +69,7 @@ public class ServiceItemRepository {
     }
     private Object[] values(ServiceItemDTO s) {
         return new Object[]{s.code(), s.name(), s.category(), s.description(), s.department(), s.location(), s.officeHours(),
-                s.contact(), write(s.requirements()), write(s.materials()), write(s.recognitionRules()), s.deadline(),
+                s.contact(), write(s.requirements()), writeMaterials(s.materials()), write(s.recognitionRules()), s.deadline(),
                 s.sourceDocumentId(), s.sourceTitle(), s.sourceUrl(), s.sourcePublishTime(), s.status(), s.isExample()};
     }
     public long insert(ServiceItemDTO s) {

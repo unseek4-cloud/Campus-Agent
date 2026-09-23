@@ -38,3 +38,7 @@ ai-service/var/
 *.log
 logs/
 tmp/
+
+# Uploaded files are runtime data, never source files
+var/
+backend/var/

@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { DataBoard, Files, Fold, Expand, School } from './icons'
 import './admin.css'
+import AdminAccessGate from './components/AdminAccessGate.vue'
 const collapsed = ref(false)
 </script>
 
@@ -19,7 +20,7 @@ const collapsed = ref(false)
     </aside>
     <div class="admin-main">
       <header class="admin-topbar"><div class="breadcrumb">管理后台 <span>/</span> {{ $route.name === 'admin-overview' ? '总览' : $route.name === 'admin-services' ? '办事事项管理' : '知识库管理' }}</div><div class="admin-avatar">管理</div></header>
-      <main class="admin-content"><router-view /></main>
+      <main class="admin-content"><AdminAccessGate><router-view /></AdminAccessGate></main>
     </div>
   </div>
 </template>

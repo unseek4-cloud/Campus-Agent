@@ -5,7 +5,9 @@ import { errorText } from '../../admin/api'
 import { deleteService, getService, listServices, saveService } from '../api'
 import type { ServiceDetail, ServiceItem } from '../types'
 import ServiceGuideCard from '../components/ServiceGuideCard.vue'
+import MaterialAttachmentEditor from '../components/MaterialAttachmentEditor.vue'
 
+const attachmentBusy = ref(false)
 const items = ref<ServiceItem[]>([]), search = ref(''), loading = ref(false), saving = ref(false), error = ref('')
 const selected = ref<ServiceDetail | null>(null), editor = ref<ServiceDetail | null>(null)
 const requirements = ref(''), subjects = ref(''), actions = ref(''), exclusions = ref('')
@@ -49,7 +51,7 @@ function moveStep(index: number, offset: number) {
   if (step) steps.splice(index + offset, 0, step)
 }
 async function save() {
-  if (!editor.value || saving.value) return
+  if (!editor.value || saving.value || attachmentBusy.value) return
   saving.value = true
   try {
     const data: ServiceDetail = JSON.parse(JSON.stringify(editor.value))
@@ -89,10 +91,10 @@ const statusText = (status: string) => ({ ACTIVE: '已启用', DRAFT: '草稿', 
       </el-table>
     </section>
     <el-drawer :model-value="!!selected" title="办事事项详情" size="min(680px, 95vw)" @close="selected = null">
-      <ServiceGuideCard v-if="selected" :service="selected.service" :steps="selected.steps" :current-step="1" />
+      <ServiceGuideCard v-if="selected" :service="selected.service" :steps="selected.steps" :current-step="1" admin-downloads />
     </el-drawer>
-    <el-dialog :model-value="!!editor" :title="editor?.service.id ? '编辑办事事项' : '新增办事事项'" width="min(860px, 96vw)" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" @close="editor = null">
-      <el-form v-if="editor" label-position="top" class="service-editor" :disabled="saving" @submit.prevent="save">
+    <el-dialog :model-value="!!editor" :title="editor?.service.id ? '编辑办事事项' : '新增办事事项'" width="min(860px, 96vw)" :close-on-click-modal="false" :close-on-press-escape="!saving && !attachmentBusy" :show-close="!saving && !attachmentBusy" @close="editor = null">
+      <el-form v-if="editor" label-position="top" class="service-editor" :disabled="saving || attachmentBusy" @submit.prevent="save">
         <div class="form-grid">
           <el-form-item label="事项名称 *"><el-input v-model="editor.service.name" maxlength="120" /></el-form-item>
           <el-form-item label="唯一业务编码 *"><el-input v-model="editor.service.code" placeholder="大写字母、数字、下划线" maxlength="80" /></el-form-item>
@@ -108,10 +110,11 @@ const statusText = (status: string) => ({ ACTIVE: '已启用', DRAFT: '草稿', 
         <el-form-item label="办理条件（每行一项）"><el-input v-model="requirements" type="textarea" :rows="3" /></el-form-item>
         <el-checkbox v-model="editor.service.isExample">这是测试 / 示例数据，不代表真实学校政策</el-checkbox>
         <h3>所需材料</h3>
-        <div v-for="(material, index) in editor.service.materials" :key="index" class="material-editor">
-          <el-input v-model="material.name" placeholder="材料名称" maxlength="160" :aria-label="`材料 ${index + 1} 名称`" />
+        <div v-for="(material, index) in editor.service.materials" :key="material.id || index" class="material-editor">
+          <div class="material-fields"><el-input v-model="material.name" placeholder="材料名称" maxlength="160" :aria-label="`材料 ${index + 1} 名称`" />
           <el-input v-model="material.description" placeholder="材料说明" maxlength="1000" :aria-label="`材料 ${index + 1} 说明`" />
-          <el-checkbox v-model="material.required">必需</el-checkbox><el-button text type="danger" @click="editor.service.materials.splice(index, 1)">删除</el-button>
+          <el-checkbox v-model="material.required">必需</el-checkbox><el-button text type="danger" @click="editor.service.materials.splice(index, 1)">删除材料</el-button></div>
+          <MaterialAttachmentEditor :service-id="editor.service.id" :material="material" :disabled="saving || attachmentBusy" @updated="material.attachment = $event; selected = null" @busy="attachmentBusy = $event" />
         </div>
         <el-button :disabled="editor.service.materials.length >= 50" @click="editor.service.materials.push({ name: '', description: null, required: true })">添加材料</el-button>
         <h3>办理步骤</h3><p class="form-help">使用上移 / 下移调整顺序，保存时按当前顺序重新编号。允许暂不维护步骤。</p>
@@ -130,11 +133,11 @@ const statusText = (status: string) => ({ ACTIVE: '已启用', DRAFT: '草稿', 
         <div class="form-grid"><el-form-item label="主题词"><el-input v-model="subjects" type="textarea" :rows="3" /></el-form-item><el-form-item label="动作词"><el-input v-model="actions" type="textarea" :rows="3" /></el-form-item></div>
         <el-form-item label="排除词"><el-input v-model="exclusions" type="textarea" :rows="2" /></el-form-item>
       </el-form>
-      <template #footer><el-button :disabled="saving" @click="editor = null">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存事项与步骤</el-button></template>
+      <template #footer><el-button :disabled="saving || attachmentBusy" @click="editor = null">取消</el-button><el-button type="primary" :loading="saving" :disabled="attachmentBusy" @click="save">保存事项与步骤</el-button></template>
     </el-dialog>
   </div>
 </template>
 
 <style scoped>
-.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 20px}.service-editor h3{font-size:16px;color:#334b63;margin:28px 0 16px;padding-top:18px;border-top:1px solid #e8edf2}.material-editor{display:flex;align-items:center;gap:9px;margin-bottom:10px}.step-editor{border:1px solid #e3eaf2;border-radius:8px;background:#fafcfe;padding:16px 18px;margin-bottom:14px}.step-editor-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.step-editor-heading strong{font-size:13px;color:#547498}.form-help{font-size:12px;color:#8392a2;line-height:1.8;margin-bottom:14px}.service-editor :deep(.el-select),.service-editor :deep(.el-date-editor){width:100%}@media(max-width:600px){.form-grid{grid-template-columns:1fr}.material-editor{flex-wrap:wrap}}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 20px}.service-editor h3{font-size:16px;color:#334b63;margin:28px 0 16px;padding-top:18px;border-top:1px solid #e8edf2}.material-editor{padding:12px;border:1px solid #e3eaf2;border-radius:8px;margin-bottom:10px}.material-fields{display:flex;align-items:center;gap:9px}.step-editor{border:1px solid #e3eaf2;border-radius:8px;background:#fafcfe;padding:16px 18px;margin-bottom:14px}.step-editor-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.step-editor-heading strong{font-size:13px;color:#547498}.form-help{font-size:12px;color:#8392a2;line-height:1.8;margin-bottom:14px}.service-editor :deep(.el-select),.service-editor :deep(.el-date-editor){width:100%}@media(max-width:600px){.form-grid{grid-template-columns:1fr}.material-fields{flex-wrap:wrap}}
 </style>
