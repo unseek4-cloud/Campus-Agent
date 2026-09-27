@@ -154,6 +154,6 @@ npm.cmd run dev -- --host 127.0.0.1
 
 ## Git 与服务状态
 
-开发分支：`feature/query-intent-routing`。2026-09-23 用户复验确认，并授权提交修复、合并到 main 和推送至 GitHub 仓库 `unseek4-cloud/Campus-Agent`。
+开发分支：`feature/query-intent-routing`。2026-09-23 已经复验确认，并授权提交修复、合并到 main 和推送至 GitHub 仓库 `unseek4-cloud/Campus-Agent`。
 
 验收结束后已关闭本次启动的 AI、Java、前端开发服务和生产预览，并确认 8000、8080、5173、4173 均无监听。MySQL80 保持运行。关闭记录：`tmp/query-intent-shutdown.json`。
