@@ -49,6 +49,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.GET, "/api/v1/health", "/api/auth/csrf").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/logout").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/student/**").hasRole("STUDENT")
                         .requestMatchers("/api/**").hasAnyRole("STUDENT", "ADMIN")
                         .anyRequest().denyAll())
                 .exceptionHandling(e -> e

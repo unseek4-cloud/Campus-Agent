@@ -70,7 +70,11 @@ public class ServiceGuideService {
     public void delete(long id, int version) {
         if (items.lock(id) == null) throw missing();
         attachments.retain(id, Set.of());
-        if (!items.delete(id, version)) throw conflict();
+        try {
+            if (!items.delete(id, version)) throw conflict();
+        } catch (DataIntegrityViolationException e) {
+            throw new BusinessException("SERVICE_HAS_APPLICATIONS", "该事项已有申请记录，请改为停用以保留办理历史", HttpStatus.CONFLICT);
+        }
     }
     private void validate(ServiceDetail data) {
         if (data == null || data.service() == null || data.steps() == null) invalid("事项和步骤不能为空");

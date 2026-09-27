@@ -15,6 +15,7 @@ async function signOut() {
 
 <template>
   <div v-if="currentUser" class="user-menu">
+    <router-link v-if="currentUser.role === 'STUDENT'" to="/student/applications">我的办事</router-link>
     <span class="user-mark" aria-hidden="true">{{ currentUser.displayName.slice(0, 1) }}</span>
     <span class="user-info"><span>{{ currentUser.displayName }}</span><small>{{ currentUser.role === 'ADMIN' ? '管理员' : currentUser.studentNo || currentUser.username }}</small></span>
     <el-button text :loading="busy" @click="signOut">退出登录</el-button>

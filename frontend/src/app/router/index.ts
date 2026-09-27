@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { homeRoutes } from '../../modules/home/routes'
 import { knowledgeRoutes } from '../../modules/knowledge/routes'
 import { adminRoutes } from '../../modules/admin/routes'
+import { applicationRoutes } from '../../modules/applications/routes'
 import { clearIdentity, currentUser, homeForRole, restoreIdentity } from '../../modules/auth/state'
 import { ElMessage } from 'element-plus'
 
@@ -12,7 +13,7 @@ const router = createRouter({
     { path: '/login', name: 'login', component: () => import('../../modules/auth/LoginPage.vue') },
     { path: '/forbidden', name: 'forbidden', component: () => import('../../modules/auth/ForbiddenPage.vue') },
     { path: '/student', redirect: '/' },
-    ...homeRoutes, ...knowledgeRoutes, ...adminRoutes,
+    ...homeRoutes, ...knowledgeRoutes, ...adminRoutes, ...applicationRoutes,
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
   scrollBehavior: () => ({ top: 0 }),
@@ -23,7 +24,7 @@ router.beforeEach(async to => {
   catch { ElMessage.error('暂时无法连接服务器，请稍后重试'); return to.path === '/login' ? true : '/login' }
   if (!currentUser.value) return to.path === '/login' ? true : '/login'
   if (to.path === '/login') return homeForRole()
-  if (to.matched.some(record => record.meta.role === 'ADMIN') && currentUser.value.role !== 'ADMIN') return '/forbidden'
+  if (to.matched.some(record => record.meta.role && record.meta.role !== currentUser.value?.role)) return '/forbidden'
   return true
 })
 

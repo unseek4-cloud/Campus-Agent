@@ -7,6 +7,7 @@ import { useServiceProgress } from '../composables/useServiceProgress'
 import ServiceProgressTimeline from './ServiceProgressTimeline.vue'
 import CurrentStepPanel from './CurrentStepPanel.vue'
 import MaterialDownloadLink from './MaterialDownloadLink.vue'
+import { currentUser } from '../../auth/state'
 
 const props = withDefaults(defineProps<{
   service: ServiceItem
@@ -15,7 +16,8 @@ const props = withDefaults(defineProps<{
   currentStep?: number | null
   adminDownloads?: boolean
   trackProgress?: boolean
-}>(), { currentStep: 1, trackProgress: false })
+  showApply?: boolean
+}>(), { currentStep: 1, trackProgress: false, showApply: true })
 const { progress, notice, persistent, busy, steps: orderedSteps, stale, current, percentage, canGoBack, navigate, reset, toggleMaterial } = useServiceProgress(props)
 async function confirmReset() {
   try {
@@ -38,6 +40,7 @@ const sourceLink = computed(() => source.value.documentId && props.service.id &&
     <header class="guide-heading">
       <span class="guide-eyebrow">办事指南 · {{ service.category }}</span>
       <h3>{{ service.name }}</h3>
+      <router-link v-if="showApply && currentUser?.role === 'STUDENT' && service.id && service.status === 'ACTIVE'" :to="`/student/services/${service.id}/apply`"><el-button type="primary" style="margin-top:16px">立即办理</el-button></router-link>
       <p v-if="service.isExample" class="example-notice">测试数据 / 示例数据 · 不代表学校真实政策，请以最新学校通知为准。</p>
       <p v-else-if="service.description" class="guide-description">{{ service.description }}</p>
     </header>
