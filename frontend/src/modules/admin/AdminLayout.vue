@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { DataBoard, Files, Fold, Expand, School } from './icons'
 import './admin.css'
-import AdminAccessGate from './components/AdminAccessGate.vue'
+import UserMenu from '../auth/UserMenu.vue'
 const collapsed = ref(false)
 </script>
 
@@ -19,8 +19,8 @@ const collapsed = ref(false)
       <div class="sidebar-foot"><span v-if="!collapsed">校园知识，清晰可管</span><button class="collapse-button" aria-label="切换侧边栏" @click="collapsed = !collapsed"><el-icon><Expand v-if="collapsed" /><Fold v-else /></el-icon></button></div>
     </aside>
     <div class="admin-main">
-      <header class="admin-topbar"><div class="breadcrumb">管理后台 <span>/</span> {{ $route.name === 'admin-overview' ? '总览' : $route.name === 'admin-services' ? '办事事项管理' : '知识库管理' }}</div><div class="admin-avatar">管理</div></header>
-      <main class="admin-content"><AdminAccessGate><router-view /></AdminAccessGate></main>
+      <header class="admin-topbar"><div class="breadcrumb">管理后台 <span>/</span> {{ $route.name === 'admin-overview' ? '总览' : $route.name === 'admin-services' ? '办事事项管理' : '知识库管理' }}</div><UserMenu /></header>
+      <main class="admin-content"><router-view /></main>
     </div>
   </div>
 </template>

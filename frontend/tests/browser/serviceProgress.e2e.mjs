@@ -1,3 +1,4 @@
+import { loginContext } from './auth.helpers.mjs'
 import assert from 'node:assert/strict'
 import { mkdir } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -12,6 +13,7 @@ const output = new URL('../../../tmp/service-progress-v11/', import.meta.url)
 await mkdir(output, { recursive: true })
 const browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', headless: true })
 const context = await browser.newContext({ viewport: { width: 1280, height: 1100 } })
+await loginContext(context, baseUrl, 'STUDENT')
 const page = await context.newPage()
 page.setDefaultTimeout(100_000)
 const errors = []

@@ -2,10 +2,12 @@ server:
   port: ${SERVER_PORT:8080}
 
 spring:
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
   sql:
     init:
       mode: always
-      schema-locations: classpath:schema.sql,classpath:db/migration/V3__service_guide.sql,classpath:db/migration/V4__material_attachments.sql
+      schema-locations: classpath:schema.sql,classpath:db/migration/V3__service_guide.sql,classpath:db/migration/V4__material_attachments.sql,classpath:db/migration/V5__auth_rbac.sql
   servlet:
     multipart:
       max-file-size: ${ADMIN_MAX_UPLOAD_SIZE_MB:20}MB
@@ -23,13 +25,16 @@ app:
   version: 0.1.0-SNAPSHOT
 
 campus:
+  auth:
+    jwt-secret: ${JWT_SECRET:}
+    expire-minutes: ${JWT_EXPIRE_MINUTES:120}
+    cookie-secure: ${AUTH_COOKIE_SECURE:false}
+    allowed-origins: ${AUTH_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
   material:
     storage-path: ${MATERIAL_UPLOAD_DIR:${campus.admin.storage-path}/materials}
   service-guide:
     ai-timeout-seconds: ${SERVICE_GUIDE_AI_TIMEOUT_SECONDS:12}
   admin:
-    username: ${ADMIN_USERNAME:}
-    password: ${ADMIN_PASSWORD:}
     max-upload-size-mb: ${ADMIN_MAX_UPLOAD_SIZE_MB:20}
     storage-path: ${ADMIN_DOCUMENT_STORAGE_PATH:var/documents}
     knowledge-base-id: ${ADMIN_KNOWLEDGE_BASE_ID:campus-default}

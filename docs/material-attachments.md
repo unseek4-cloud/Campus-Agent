@@ -53,7 +53,7 @@ SOURCE backend/campus-app/src/main/resources/db/migration/V4__material_attachmen
 
 | 方法 | 路径 | 权限与行为 |
 | --- | --- | --- |
-| GET | `/api/admin/session` | 验证管理员账号，返回用户名与 CSRF token/header |
+| GET | `/api/auth/csrf` | 获取登录/写操作所需 CSRF token/header |
 | GET | `/api/admin/material-attachments/config` | 管理员读取扩展名白名单及单文件上限 |
 | POST | `/api/admin/services/{serviceId}/materials/{materialId}/attachment` | 管理员上传 / 替换；multipart 的字段为 `file` |
 | DELETE | 同上 | 管理员删除附件；材料保留 |
@@ -80,21 +80,19 @@ SOURCE backend/campus-app/src/main/resources/db/migration/V4__material_attachmen
 
 前端复用 Axios 下载 Blob，读响应中的文件名，通过浏览器下载机制保存，不跳转新页面。失败统一显示「文件下载失败，请稍后重试。」下载链接阻止事件冒泡，不触发材料复选框。
 
-## 管理员认证
+## 统一登录认证
 
-原项目没有登录鉴权，经确认使用环境变量管理员账号和 Spring Security HTTP Basic，身份模块负责认证，**整个 `/api/admin/**` 都要求 ADMIN 权限**。未配置账号 / 密码时拒绝管理访问；没有默认密码或新的账号表。学生查询、问答和已启用事项附件下载维持公开访问。
+认证已升级为数据库账号 + Spring Security RBAC + JWT HttpOnly Cookie，详见 [统一登录与账号管理](auth-rbac.md)。`/api/admin/**` 只允许 ADMIN；学生查询、问答和已发布附件下载要求 STUDENT 或 ADMIN 登录。前端在统一 `/login` 验证身份，刷新用 `/api/auth/me` 恢复登录。
 
-管理员页面先显示账号验证面板；凭据仅保存在当前页面内存中，不存入 localStorage/sessionStorage，不写入前端环境变量，不随学生 API 发送。刷新或离开管理布局需要重新验证。
-
-保留 Spring Security 的 CSRF 防护。浏览器 / API 客户端先带 HTTP Basic 请求 `/api/admin/session`，保留返回的会话 Cookie，再将返回的 `csrfToken` 按 `csrfHeader` 写入管理变更请求，同时继续发送 HTTP Basic。生产部署需使用 HTTPS。配置依据：[Spring Security Java 配置](https://docs.spring.io/spring-security/reference/servlet/configuration/java.html)、[CSRF](https://docs.spring.io/spring-security/reference/servlet/exploits/csrf.html)。
+保留 CSRF 防护。API 客户端先 GET `/api/auth/csrf`，保留 Cookie，并把返回的 token/headerName 加到登录及其他 POST/PUT/PATCH/DELETE 请求。旧 HTTP Basic 与 `/api/admin/session` 已移除。附件业务和下载格式保持不变。
 
 ## 配置与启动
 
 `backend/.env.example` 已同步新增配置。在本地 `backend/.env` 设置自己的值（不要提交凭据）：
 
 ```dotenv
-ADMIN_USERNAME=your-admin-name
-ADMIN_PASSWORD=your-private-password
+JWT_SECRET=配置随机Base64密钥，见统一登录文档
+AUTH_COOKIE_SECURE=false
 ADMIN_MAX_UPLOAD_SIZE_MB=20
 ADMIN_DOCUMENT_STORAGE_PATH=var/documents
 # 可选，省略时使用知识库目录下的 materials 子目录
@@ -127,7 +125,7 @@ ADMIN_DOCUMENT_STORAGE_PATH=var/documents
 - `backend`：`mvn test`；构建为 `mvn package`。集成测试使用 H2 的 MySQL 模式及真实 Spring Security 过滤链、事务和临时文件目录，不需要线上凭据。
 - `frontend`：`npm run build`、`npm test`。
 - `ai-service`：`.venv/Scripts/python.exe -m pytest -q --basetemp ../tmp/pytest-material-attachments`。
-- 浏览器真实服务验收：先运行 `python scripts/create-material-test-fixtures.py`，准备 Playwright / Edge，设置 `CAMPUS_BASE_URL` 为实际前端地址、`ADMIN_USERNAME / ADMIN_PASSWORD` 为测试管理员凭据，然后运行 `node frontend/tests/browser/materialAttachments.e2e.mjs`。如 Playwright 不在原项目测试目录，设置 `PLAYWRIGHT_MODULE_PATH` 为其 `index.mjs` 路径。脚本创建独立事项并在 finally 中删除；不修改现有事项。
+- 浏览器真实服务验收：先运行 `python scripts/create-material-test-fixtures.py`，准备 Playwright / Edge，设置 `CAMPUS_BASE_URL` 为实际前端地址、`ADMIN_USERNAME / ADMIN_PASSWORD` 为数据库测试管理员凭据、`STUDENT_USERNAME / STUDENT_PASSWORD` 为数据库测试学生凭据，然后运行 `node frontend/tests/browser/materialAttachments.e2e.mjs`。如 Playwright 不在原项目测试目录，设置 `PLAYWRIGHT_MODULE_PATH` 为其 `index.mjs` 路径。脚本创建独立事项并在 finally 中删除；不修改现有事项。
 
 本次已完成真实 MySQL + Edge 流程测试：上传、管理员下载、学生蓝色链接、中文 / 空格文件名、下载字节一致、无附件隐藏、勾选保留、替换、删除、失效链接提示、移动端及权限拦截。下载的 DOCX 与有效 Office Open XML 测试源文件逐字节一致；未自动驱动 Word / WPS 桌面应用。截图保存在本地 `tmp/material-browser/`。
 

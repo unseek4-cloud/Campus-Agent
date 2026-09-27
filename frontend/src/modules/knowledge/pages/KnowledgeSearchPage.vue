@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import UserMenu from '../../auth/UserMenu.vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { computed, ref } from 'vue'
@@ -104,6 +105,7 @@ function clearConversation(): void {
           <h1>校园事务智能问答</h1>
           <p>提出问题，查看简洁答案及其知识库来源。</p>
         </div>
+        <UserMenu />
         <router-link to="/">
           <el-button>返回首页</el-button>
         </router-link>

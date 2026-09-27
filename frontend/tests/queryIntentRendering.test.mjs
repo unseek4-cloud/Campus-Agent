@@ -23,7 +23,7 @@ async function renderResponse(response) {
     }),
   })
   const slotComponent = { setup: (_, { slots }) => () => Vue.h('div', slots.default?.()) }
-  for (const name of ['router-link', 'el-tag', 'el-button', 'el-empty', 'el-card', 'el-form', 'el-form-item', 'el-input', 'el-select', 'el-option', 'el-divider']) {
+  for (const name of ['UserMenu', 'router-link', 'el-tag', 'el-button', 'el-empty', 'el-card', 'el-form', 'el-form-item', 'el-input', 'el-select', 'el-option', 'el-divider']) {
     app.component(name, slotComponent)
   }
   app.component('ServiceGuideCard', { setup() { guideMounts++; return () => Vue.h('section', { class: 'service-guide' }) } })

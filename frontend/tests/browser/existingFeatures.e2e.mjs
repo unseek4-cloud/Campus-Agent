@@ -1,3 +1,4 @@
+import { loginContext } from './auth.helpers.mjs'
 import assert from 'node:assert/strict'
 import { pathToFileURL } from 'node:url'
 const moduleUrl = process.env.PLAYWRIGHT_MODULE_PATH ? pathToFileURL(process.env.PLAYWRIGHT_MODULE_PATH).href
@@ -6,6 +7,7 @@ const { chromium } = await import(moduleUrl)
 const baseUrl = process.env.CAMPUS_BASE_URL || 'http://127.0.0.1:5173'
 const browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', headless: true })
 const context = await browser.newContext()
+await loginContext(context, baseUrl, 'ADMIN')
 const page = await context.newPage()
 page.setDefaultTimeout(90_000)
 const created = []

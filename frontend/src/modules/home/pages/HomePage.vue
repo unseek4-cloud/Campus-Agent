@@ -1,10 +1,14 @@
+<script setup lang="ts">
+import UserMenu from '../../auth/UserMenu.vue'
+</script>
+
 <template>
   <main class="home-page">
     <el-card class="intro-card" shadow="never">
       <template #header>
         <div class="card-header">
           <span>CampusAgent</span>
-          <el-tag type="success">基础骨架已就绪</el-tag>
+          <UserMenu />
         </div>
       </template>
 

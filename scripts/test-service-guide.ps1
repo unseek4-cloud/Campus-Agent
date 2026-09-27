@@ -1,8 +1,16 @@
-﻿param([string]$BaseUrl = 'http://localhost:8080')
+﻿param([string]$BaseUrl = 'http://localhost:8080', [PSCredential]$Credential)
 $ErrorActionPreference = 'Stop'
+if (!$Credential) { $Credential = Get-Credential -Message 'CampusAgent database account' }
+$csrf = (Invoke-RestMethod -Uri "$BaseUrl/api/auth/csrf" -SessionVariable campusSession).data
+$authHeaders = @{}; $authHeaders[$csrf.headerName] = $csrf.token
+$loginBody = @{ username = $Credential.UserName; password = $Credential.GetNetworkCredential().Password } | ConvertTo-Json
+Invoke-RestMethod -Uri "$BaseUrl/api/auth/login" -Method Post -WebSession $campusSession -Headers $authHeaders -ContentType 'application/json' -Body $loginBody | Out-Null
+$loginBody = $null
+$csrf = (Invoke-RestMethod -Uri "$BaseUrl/api/auth/csrf" -WebSession $campusSession).data
+$authHeaders = @{}; $authHeaders[$csrf.headerName] = $csrf.token
 function Send-GuideQuestion([string]$Path, [string]$Question) {
     $body = [Text.Encoding]::UTF8.GetBytes((@{ query = $Question } | ConvertTo-Json))
-    return (Invoke-RestMethod -Method Post -Uri "$BaseUrl$Path" -ContentType 'application/json; charset=utf-8' -Body $body).data
+    return (Invoke-RestMethod -Method Post -Uri "$BaseUrl$Path" -WebSession $campusSession -Headers $authHeaders -ContentType 'application/json; charset=utf-8' -Body $body).data
 }
 foreach ($test in @(
     @{ question = '学生证丢了怎么办？'; code = 'STUDENT_CARD_REISSUE' },
@@ -20,10 +28,12 @@ if ($guide.type -ne 'SERVICE_GUIDE' -or $guide.service.code -ne 'STUDENT_CARD_RE
 }
 Write-Host "PASS structured chat: steps=$($guide.steps.Count), aiEnhanced=$($guide.aiEnhanced)"
 try {
-    Invoke-RestMethod -Uri "$BaseUrl/api/services/9223372036854775807" | Out-Null
+    Invoke-RestMethod -Uri "$BaseUrl/api/services/9223372036854775807" -WebSession $campusSession | Out-Null
     throw 'Missing service unexpectedly exists.'
 } catch {
     if (!$_.Exception.Response -or [int]$_.Exception.Response.StatusCode -ne 404) { throw }
     Write-Host 'PASS missing service: HTTP 404'
 }
 Write-Host 'Core service guide checks passed. Stop Python and rerun to verify AI-offline fallback.'
+
+Invoke-RestMethod -Uri "$BaseUrl/api/auth/logout" -Method Post -WebSession $campusSession -Headers $authHeaders | Out-Null

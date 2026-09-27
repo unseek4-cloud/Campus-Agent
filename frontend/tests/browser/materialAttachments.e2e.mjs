@@ -1,3 +1,4 @@
+import { loginApi, loginContext } from './auth.helpers.mjs'
 import assert from 'node:assert/strict'
 import { readFile, mkdir } from 'node:fs/promises'
 import { pathToFileURL, fileURLToPath } from 'node:url'
@@ -10,11 +11,8 @@ const credentials = process.env.MATERIAL_TEST_AUTH_FILE
   ? JSON.parse(await readFile(process.env.MATERIAL_TEST_AUTH_FILE, 'utf8'))
   : { username: process.env.ADMIN_USERNAME, password: process.env.ADMIN_PASSWORD }
 assert.ok(credentials.username && credentials.password, 'Supply admin test credentials through environment variables')
-const auth = 'Basic ' + Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64')
-const api = await request.newContext({ baseURL, extraHTTPHeaders: { Authorization: auth } })
-const authResponse = await api.get('/api/admin/session'); assert.equal(authResponse.status(), 200)
-const session = (await authResponse.json()).data
-const headers = { [session.csrfHeader]: session.csrfToken }
+const api = await request.newContext({ baseURL })
+const headers = await loginApi(api, '', credentials)
 const browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', headless: true })
 const output = new URL('../../../tmp/material-browser/', import.meta.url)
 await mkdir(output, { recursive: true })
@@ -43,6 +41,8 @@ async function download(tab, link, name) {
   assert.equal(tab.url(), url)
 }
 try {
+  await loginApi(admin.request, baseURL, credentials)
+  await loginContext(student, baseURL)
   const response = await api.post('/api/admin/services', { headers, data: {
     service: { code: `TEST_ATTACHMENT_${stamp}`, name: title, category: '自动验收', description: '测试结束后自动删除', status: 'ACTIVE', isExample: true, version: 0,
       requirements: [], materials: [{ name: '学生证补办申请表', description: '请填写完整', required: true }, { name: '身份证明', description: '本人有效身份证明', required: true }, { name: '证件照', required: true }],
@@ -50,9 +50,6 @@ try {
     steps: [{ order: 1, title: '提交材料', requiredMaterials: ['学生证补办申请表'] }] } })
   assert.equal(response.status(), 200); serviceId = (await response.json()).data.service.id
   await page.goto(baseURL + '/admin/services')
-  await page.locator('input[autocomplete="username"]').fill(credentials.username)
-  await page.locator('input[autocomplete="current-password"]').fill(credentials.password)
-  await page.getByRole('button', { name: '验证并进入' }).click()
   await page.locator('.el-table__row').filter({ hasText: title }).getByRole('button', { name: '编辑', exact: true }).click()
   const editor = page.locator('.el-dialog .service-editor'), attachment = editor.locator('.attachment-editor').first()
   await attachment.getByText('暂无附件', { exact: true }).waitFor()
@@ -97,7 +94,7 @@ try {
   assert.equal(await learner.locator('.material-item').count(), 3)
   assert.match(await material.innerText(), /学生证补办申请表/)
   assert.equal(await material.locator('input').isChecked(), true)
-  assert.equal((await student.request.get(baseURL + '/api/admin/services')).status(), 401)
+  assert.equal((await student.request.get(baseURL + '/api/admin/services')).status(), 403)
   assert.ok([401, 403].includes((await student.request.delete(baseURL + `/api/admin/services/${serviceId}/materials/${initial.service.materials[0].id}/attachment`)).status()))
   assert.deepEqual(errors, [])
   console.log('PASS real MySQL + browser: admin authentication, upload/download, student blue link, Chinese and spaced names, byte-identical downloads, checkbox retained, optional attachments hidden, replace, delete, stale-link failure, mobile layout and authorization')

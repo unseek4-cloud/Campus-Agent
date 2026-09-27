@@ -1,5 +1,8 @@
 # CampusAgent
 
+统一登录已接入：[账号创建、BCrypt、SQL、启动与手动验收完整指南](docs/auth-rbac.md)。首次启动需要配置 `JWT_SECRET`。
+
+
 CampusAgent 是面向高校学生的事务智能问答与办事引导系统。本仓库包含文档知识库检索和 RAG 智能问答链路。
 
 本项目目前由AIC  海底小纵队 队伍负责开发与维护
@@ -123,8 +126,8 @@ PDF / DOCX
   → 前端答案和引用来源
 ```
 
-检索公共接口：`POST http://localhost:8080/api/knowledge/search`。
-问答公共接口：`POST http://localhost:8080/api/rag/chat`。
+检索学生接口（需登录）：`POST http://localhost:8080/api/knowledge/search`。
+问答学生接口（需登录）：`POST http://localhost:8080/api/rag/chat`。
 
 前端问答页：`http://localhost:5173/knowledge/search`，原始检索结果在“检索调试”区域。
 
@@ -171,7 +174,7 @@ Java 公共接口 `POST /api/rag/chat` 的多轮请求示例：
 
 ## 管理员知识库
 
-启动三个服务后访问 [管理员端](http://localhost:5173/admin)。`/admin` 展示真实文档统计和最近上传，`/admin/knowledge` 提供搜索、类型与状态筛选、分页、批量上传、详情、重命名、重新解析和删除。Swagger 与 Python OpenAPI 继续用于开发调试；日常知识库管理请使用管理员页面。管理员接口现在使用 Spring Security HTTP Basic 与 CSRF 保护；在 `backend/.env` 配置 `ADMIN_USERNAME / ADMIN_PASSWORD` 后进入管理员页面验证，未配置凭据时拒绝管理访问。生产部署使用 HTTPS。
+启动三个服务后访问 [管理员端](http://localhost:5173/admin)。`/admin` 展示真实文档统计和最近上传，`/admin/knowledge` 提供搜索、类型与状态筛选、分页、批量上传、详情、重命名、重新解析和删除。Swagger 与 Python OpenAPI 继续用于开发调试；日常知识库管理请使用管理员页面。所有业务接口现在使用数据库账号、Spring Security RBAC、JWT HttpOnly Cookie 和 CSRF 保护。请先按 [统一登录与账号管理](docs/auth-rbac.md) 配置 JWT_SECRET 并初始化账号，再从 `/login` 登录。STUDENT 进入学生端，ADMIN 进入现有后台。生产部署使用 HTTPS。
 
 上传支持 PDF、DOCX、TXT、Markdown、XLSX、PPTX、PNG、JPG/JPEG；不支持 DOC/XLS/PPT 等旧版 Office 格式。默认单文件上限 20 MB，由 Java 的 `ADMIN_MAX_UPLOAD_SIZE_MB` 配置，Python 的 `AI_MAX_PDF_SIZE_MB` 应设为相同或更高。前端从 Java 配置接口读取上限；Java 与 Python 均校验文件类型和内容。TXT/Markdown 使用 UTF-8；PDF 保留现有文本层与扫描页 OCR；DOCX 保留现有解析器；XLSX 按工作表提取表头和行；PPTX 按幻灯片提取文字及页码；图片也使用 OCRManager。所有格式复用同一清洗、Chunk、Embedding、Chroma 入库流程。
 

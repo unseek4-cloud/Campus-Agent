@@ -1,0 +1,67 @@
+import assert from 'node:assert/strict'
+import { mkdir } from 'node:fs/promises'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { credentials, loginApi } from './auth.helpers.mjs'
+const moduleUrl = process.env.PLAYWRIGHT_MODULE_PATH ? pathToFileURL(process.env.PLAYWRIGHT_MODULE_PATH).href
+  : new URL('../../../tmp/browser-check/node_modules/playwright-core/index.mjs', import.meta.url).href
+const { chromium } = await import(moduleUrl)
+const baseURL = process.env.CAMPUS_BASE_URL || 'http://127.0.0.1:5173'
+const browser = await chromium.launch({ executablePath: process.env.BROWSER_EXECUTABLE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', headless: true })
+const output = new URL('../../../tmp/auth-browser/', import.meta.url)
+await mkdir(output, { recursive: true })
+const errors = []
+async function submit(page, account) {
+  await page.locator('input[autocomplete="username"]').fill(account.username)
+  await page.locator('input[autocomplete="current-password"]').fill(account.password)
+  await page.getByRole('button', { name: '登录', exact: true }).click()
+}
+try {
+  const admin = await browser.newContext({ viewport: { width: 1440, height: 980 } })
+  const page = await admin.newPage()
+  page.on('pageerror', e => errors.push(e.message))
+  await page.goto(baseURL + '/admin')
+  await page.waitForURL('**/login')
+  await page.screenshot({ path: fileURLToPath(new URL('login-desktop.png', output)), fullPage: true })
+  assert.equal((await admin.request.get(baseURL + '/api/admin/services')).status(), 401)
+  await submit(page, { username: credentials('ADMIN').username, password: 'incorrect-password' })
+  await page.getByRole('alert').filter({ hasText: '账号或密码错误' }).waitFor()
+  await submit(page, credentials('ADMIN'))
+  await page.waitForURL('**/admin')
+  await page.getByText('系统管理员', { exact: true }).waitFor()
+  await page.reload(); await page.getByText('系统管理员', { exact: true }).waitFor()
+  const authCookie = (await admin.cookies()).find(c => c.name === 'CAMPUS_AUTH')
+  assert.ok(authCookie.httpOnly); assert.equal(authCookie.sameSite, 'Lax')
+  assert.equal(await page.evaluate(() => document.cookie.includes('CAMPUS_AUTH')), false)
+  for (const path of ['/api/admin/overview', '/api/admin/documents', '/api/admin/services', '/api/admin/material-attachments/config'])
+    assert.equal((await admin.request.get(baseURL + path)).status(), 200)
+  await page.getByRole('link', { name: '知识库管理', exact: true }).click()
+  await page.waitForURL('**/admin/knowledge')
+  await page.getByRole('button', { name: '退出登录' }).click(); await page.waitForURL('**/login')
+  await page.goBack(); await page.waitForURL('**/login')
+  const replay = await browser.newContext(); await replay.addCookies([authCookie])
+  assert.equal((await replay.request.get(baseURL + '/api/admin/services')).status(), 401)
+  await replay.close()
+  const student = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  const learner = await student.newPage(); learner.on('pageerror', e => errors.push(e.message))
+  await learner.goto(baseURL + '/student'); await learner.waitForURL('**/login')
+  await submit(learner, credentials())
+  await learner.waitForURL(baseURL + '/')
+  await learner.getByText('张三', { exact: true }).waitFor()
+  await learner.reload(); await learner.getByText('张三', { exact: true }).waitFor()
+  await learner.goto(baseURL + '/admin'); await learner.waitForURL('**/forbidden')
+  await learner.getByText('你没有权限访问该页面。', { exact: true }).waitFor()
+  assert.equal((await student.request.get(baseURL + '/api/admin/xxx')).status(), 403)
+  assert.equal((await student.request.get(baseURL + '/api/services')).status(), 200)
+  await learner.goto(baseURL + '/knowledge/search')
+  await learner.locator('textarea').fill('学生证丢了怎么补办？')
+  const chat = learner.waitForResponse(r => r.url().endsWith('/api/rag/chat'))
+  await learner.getByRole('button', { name: '发送', exact: true }).click()
+  assert.equal((await chat).status(), 200)
+  await learner.locator('.service-guide').waitFor()
+  await learner.getByRole('button', { name: '退出登录' }).click(); await learner.waitForURL('**/login')
+  await learner.setViewportSize({ width: 390, height: 844 })
+  assert.equal(await learner.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
+  await learner.screenshot({ path: fileURLToPath(new URL('login-mobile.png', output)), fullPage: true })
+  assert.deepEqual(errors, [])
+  console.log('PASS auth browser: unified login, errors, role landing, refresh, student route/API denial, cookie flags, logout/back/replay, guide chat, mobile')
+} finally { await browser.close() }

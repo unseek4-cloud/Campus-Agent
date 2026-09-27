@@ -2,6 +2,7 @@ import type { RouteRecordRaw } from 'vue-router'
 
 export const adminRoutes: RouteRecordRaw[] = [{
   path: '/admin',
+  meta: { role: 'ADMIN' },
   component: () => import('./AdminLayout.vue'),
   children: [
     { path: 'services', name: 'admin-services', component: () => import('../serviceguide/pages/ServiceManagementPage.vue') },
