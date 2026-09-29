@@ -37,6 +37,8 @@ export interface KnowledgeSearchResponse {
 }
 
 export interface RagChatRequest {
+  conversationId?: number
+  requestId?: string
   query: string
   knowledgeBaseId?: string
   history?: ConversationMessage[]
@@ -58,6 +60,9 @@ export interface RagSource {
 }
 
 export interface RagChatResponse {
+  conversationId?: number
+  userMessageId?: number
+  assistantMessageId?: number
   type: 'QA' | 'SERVICE_GUIDE'
   queryIntent?: 'GENERAL_QA' | 'POLICY_QA' | 'ELIGIBILITY_QA' | 'SERVICE_GUIDE'
   relatedService?: { code: string; name: string } | null

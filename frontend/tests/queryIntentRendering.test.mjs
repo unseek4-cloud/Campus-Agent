@@ -19,11 +19,12 @@ async function renderResponse(response) {
     setup: () => ({
       messages: [{ role: 'assistant', content: '知识库回答', response }],
       query: '', topK: 5, topKOptions: [5], loading: false, searched: false, results: [], canSearch: false,
-      handleChat() {}, handleSearch() {}, clearConversation() {}, scoreText: String,
+      conversations: [], activeId: null, ready: true, busy: false, pending: false, historyError: '', chat: { remove() {}, restore() {} },
+      handleChat() {}, handleSearch() {}, newConversation() {}, selectConversation() {}, scoreText: String,
     }),
   })
   const slotComponent = { setup: (_, { slots }) => () => Vue.h('div', slots.default?.()) }
-  for (const name of ['UserMenu', 'router-link', 'el-tag', 'el-button', 'el-empty', 'el-card', 'el-form', 'el-form-item', 'el-input', 'el-select', 'el-option', 'el-divider']) {
+  for (const name of ['ChatHistory', 'el-alert', 'UserMenu', 'router-link', 'el-tag', 'el-button', 'el-empty', 'el-card', 'el-form', 'el-form-item', 'el-input', 'el-select', 'el-option', 'el-divider']) {
     app.component(name, slotComponent)
   }
   app.component('ServiceGuideCard', { setup() { guideMounts++; return () => Vue.h('section', { class: 'service-guide' }) } })

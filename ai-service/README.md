@@ -113,7 +113,7 @@ Invoke-RestMethod -Method Delete `
 }
 ```
 
-这是无状态会话：浏览器维护历史，Java 校验后转发，Python 只取最近 `AI_CONVERSATION_MAX_MESSAGES` 条用于 Query Rewrite。改写器复用现有 LLM Provider；改写结果仅用于 Retrieval 和 Rerank。最终回答 Prompt 仍只含用户本轮原问题及本次知识库 Context，历史回答不作为事实来源，`sources` 仍只来自本次 Context。无历史时完全跳过改写；Provider 超时、异常、空值或异常格式时回退原问题并继续现有 RAG。`rewrittenQuery` 为调试字段，不含完整 Prompt。
+Python 仍是无状态服务：Java 按当前登录用户将会话与消息持久化到 MySQL，从数据库取最近上下文后转发；浏览器只保存最近会话 ID。Python 只取最近 `AI_CONVERSATION_MAX_MESSAGES` 条用于 Query Rewrite。改写器复用现有 LLM Provider；改写结果仅用于 Retrieval 和 Rerank。最终回答 Prompt 仍只含用户本轮原问题及本次知识库 Context，历史回答不作为事实来源，`sources` 仍只来自本次 Context。无历史时完全跳过改写；Provider 超时、异常、空值或异常格式时回退原问题并继续现有 RAG。`rewrittenQuery` 为调试字段，不含完整 Prompt。
 
 处理流程：候选召回 → 现有 Rerank 和时间证据排序 → 原始模型分数过滤 → 最多 3 个 Chunk → 去重和长度限制 → 千问 OpenAI Compatible `/chat/completions` → 答案与来源。日期证据角色明确冲突的片段不会进入 Context。没有片段达到阈值时直接返回“根据当前知识库暂未找到相关信息。”，不调用千问。
 
@@ -317,3 +317,5 @@ Invoke-RestMethod -Method Post `
 4. `校园火星基地怎么申请？`：当前本地知识库应返回固定的“根据当前知识库暂未找到相关信息。”，`sources` 为空、`usedContextCount` 为 0。
 
 衡量无关回答是否改善：同时用旧检索 API 查看同一问题的 Top 10，再检查 RAG 的 `usedContextCount` 和 `sources`。当前本地索引中，时间问题从 10 个重排候选缩减到 1 个上下文片段；对象和地点各缩减到 3 个。最终答案只应包含所问字段。LLM 答案的语义质量仍需配置真实千问 Key 后人工复核；自动测试使用替身 Provider，不会消费 API 额度。
+
+聊天持久化由 Java 业务后端负责，AI service 不直接访问 MySQL。启动及验收详见 [聊天历史说明](../docs/chat-history.md)。
