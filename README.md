@@ -133,7 +133,7 @@ PDF / DOCX
 
 ## 多轮问答
 
-问答页在当前浏览器页面内保存消息列表，按轮展示回答和对应来源。发送新问题时，前端只携带该问题**之前**最近的消息；刷新页面或点击“清空对话”会清除当前会话。无需 Redis 或会话数据库。
+问答会话及消息按登录用户持久化到 MySQL，按轮展示回答和对应来源。发送新问题时，Java 从当前用户的会话中读取最近 8 条上下文，浏览器不再提供可信历史。刷新、页面切换和重新登录均恢复记录；“新建对话”保留旧记录。详见 [聊天历史验收](docs/chat-history.md)。
 
 ```text
 当前问题 + 最近历史 → Python Query Rewriter → 独立检索问题
@@ -154,7 +154,7 @@ Java 公共接口 `POST /api/rag/chat` 的多轮请求示例：
 }
 ```
 
-响应的 `data.rewrittenQuery` 可在问答页每轮的“本轮调试信息”中查看。来源只对应本次进入 Context 的 Chunk。`AI_CONVERSATION_MAX_MESSAGES` 控制 Python 最多用于改写的最近消息数，默认 8；前端的 `VITE_CONVERSATION_MAX_MESSAGES` 控制发送上限，也默认 8。调整时建议两者一致。`AI_QUERY_REWRITE_ENABLED=false` 可关闭改写；`AI_QUERY_REWRITE_TEMPERATURE=0` 是默认改写温度。这些设置写在各自的 `.env.example` 中，实际密钥只放本地 `.env`。
+响应的 `data.rewrittenQuery` 可在问答页每轮的“本轮调试信息”中查看。来源只对应本次进入 Context 的 Chunk。`AI_CONVERSATION_MAX_MESSAGES` 控制 Python 最多用于改写的最近消息数，默认 8；Java 从数据库最多取最近 8 条，每条上下文截取最多 4000 字符，存储的完整回答不截断。前端不再使用 `VITE_CONVERSATION_MAX_MESSAGES`。`AI_QUERY_REWRITE_ENABLED=false` 可关闭改写；`AI_QUERY_REWRITE_TEMPERATURE=0` 是默认改写温度。这些设置写在各自的 `.env.example` 中，实际密钥只放本地 `.env`。
 
 本地验证：入库心理测评通知后，在网页先问“2026级新生心理测评什么时候？”，再问“对象是谁？”或“在哪里进行？”，核对 `rewrittenQuery` 和对应来源；随后问“奖学金申请需要什么材料？”，确认改写没有混入心理测评；再问知识库不存在的“火星校区怎么坐飞船过去？”，应返回“根据当前知识库暂未找到相关信息。”。自动测试：在 `ai-service` 运行 `python -m pytest`，在 `backend` 运行 `mvn test`，在 `frontend` 运行 `npm run build`。自动多轮测试使用模拟 Provider，不消耗千问额度。
 
@@ -183,3 +183,7 @@ Java 在上传时计算 SHA-256，并通过 `(knowledge_base_id, file_hash)` 唯
 新增格式时，在 `ai-service/app/services/document_parsers.py` 实现返回 `DocumentPage` 的解析器，将扩展名、MIME 和文件头校验加入 `ParserRegistry`，再于 `get_document_service()` 注册。后续 Chunk、Embedding 与向量存储无需修改。
 
 手工验收：进入 `/admin/knowledge` 上传一份文档，确认解析状态与片段数；将同一文件改名再上传，应显示重复提示且文档数不增加；在文档操作菜单中重命名后到学生端提问并核对来源；执行重新解析后检查片段数；删除后检查列表和学生端检索均不再出现该文档。自动验证命令：`ai-service/.venv/Scripts/python.exe -m pytest -q --basetemp .pytest-tmp`、在 `backend` 运行 `mvn test`、在 `frontend` 运行 `npm run build`。需要 MySQL、模型和千问 Key 的真实端到端问答验收仍须在完整运行环境执行。
+
+## AI 问答历史记录
+
+聊天正文现在按登录用户保存到 MySQL，支持页面返回、刷新、重新登录恢复，以及新建、切换和删除会话。启动后端会自动执行 V7 migration。详见 [聊天历史功能与从 MySQL 启动开始的手动验收步骤](docs/chat-history.md)。

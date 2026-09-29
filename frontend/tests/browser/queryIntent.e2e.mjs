@@ -27,7 +27,7 @@ const guides = [
   '心理测评在哪里做？', '告诉我奖学金申请的具体步骤',
 ]
 async function ask(question) {
-  if (await page.locator('.assistant-message').count()) await page.getByRole('button', { name: '清空对话', exact: true }).click()
+  if (await page.locator('.assistant-message').count()) await page.getByRole('button', { name: '新建对话', exact: true }).click()
   await page.locator('textarea').fill(question)
   const pending = page.waitForResponse(r => r.url().endsWith('/api/rag/chat') && r.request().method() === 'POST')
   await page.getByRole('button', { name: '发送', exact: true }).click()
@@ -97,7 +97,19 @@ try {
   // Deliberately malformed QA payloads must never mount a card or initialize/update progress.
   const before = await savedProgress()
   let fixture
-  await page.route('**/api/rag/chat', route => route.fulfill({ json: { code: 'OK', data: fixture } }))
+  // Mock both endpoints at the same API boundary now that the page reads saved messages.
+  let fixtureConversationId
+  await page.route('**/api/rag/chat', route => {
+    fixtureConversationId = route.request().postDataJSON().conversationId
+    return route.fulfill({ json: { code: 'OK', data: { ...fixture, conversationId: fixtureConversationId, userMessageId: 1, assistantMessageId: 2 } } })
+  })
+  await page.route('**/api/chat/conversations/*/messages', route => {
+    if (!fixture || !route.request().url().endsWith(`/${fixtureConversationId}/messages`)) return route.continue()
+    return route.fulfill({ json: { code: 'OK', data: { pending: false, messages: [
+      { id: 1, role: 'USER', content: 'QA 响应卡片隔离测试', response: null },
+      { id: 2, role: 'ASSISTANT', content: fixture.answer, response: fixture },
+    ] } } })
+  })
   for (const extra of [
     { serviceCode: guide.service.code, relatedService: { code: guide.service.code, name: guide.service.name } },
     { service: guide.service, steps: guide.steps, queryIntent: 'SERVICE_GUIDE' },

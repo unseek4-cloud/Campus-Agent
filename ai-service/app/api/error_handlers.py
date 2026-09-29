@@ -192,7 +192,8 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def handle_validation_exception(
         request: Request, exception: RequestValidationError
     ) -> JSONResponse:
-        logger.info("Request validation failed: %s", exception.errors())
+        # Pydantic errors include submitted input, which may be private chat text.
+        logger.info("Request validation failed: count=%d", len(exception.errors()))
         return _json_error(
             422,
             ApiResponse.error("VALIDATION_ERROR", "Request validation failed", _request_id(request)),

@@ -27,7 +27,7 @@ public class DatabaseServiceIntentRecognizer implements ServiceIntentRecognizer 
         String q = normalize(query);
         QueryIntent ruleIntent = QueryIntentRules.classify(query);
         ServiceItemDTO related = null;
-        log.info("[ServiceIntent] query={}", query.replaceAll("[\\r\\n\\t]", " ").substring(0, Math.min(query.length(), 160)));
+        log.info("[ServiceIntent] recognition requested");
         try {
             var items = catalog.list(true);
             var candidates = items.stream().filter(s -> !excluded(q, s.recognitionRules().exclusions())).toList();

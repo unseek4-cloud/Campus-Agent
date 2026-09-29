@@ -5,26 +5,22 @@ import { ElMessage } from 'element-plus'
 import { computed, ref } from 'vue'
 import ServiceGuideCard from '../../serviceguide/components/ServiceGuideCard.vue'
 
-import { chatWithKnowledge, searchKnowledge } from '../api'
-import type { ApiResponse, ConversationMessage, KnowledgeSearchResult, RagChatResponse } from '../types'
+import { searchKnowledge } from '../api'
+import ChatHistory from '../history/ChatHistory.vue'
+import { useChatHistory } from '../history/useChatHistory'
+import type { ApiResponse, KnowledgeSearchResult } from '../types'
 
-interface ChatMessage extends ConversationMessage {
-  response?: RagChatResponse
-}
 
 const query = ref('')
 const topK = ref(5)
-const loading = ref(false)
+const searching = ref(false)
+const chat = useChatHistory()
+const { conversations, messages, activeId, busy, pending, ready, error: historyError } = chat
+const loading = computed(() => searching.value || busy.value || pending.value)
 const searched = ref(false)
 const results = ref<KnowledgeSearchResult[]>([])
-const messages = ref<ChatMessage[]>([])
-const configuredHistoryLimit = Number(import.meta.env.VITE_CONVERSATION_MAX_MESSAGES ?? 8)
-const historyLimit = Number.isInteger(configuredHistoryLimit) && configuredHistoryLimit > 0
-  ? Math.min(configuredHistoryLimit, 100)
-  : 8
-
 const topKOptions = [1, 3, 5, 10, 20]
-const canSearch = computed(() => query.value.trim().length > 0 && !loading.value)
+const canSearch = computed(() => query.value.trim().length > 0 && !loading.value && ready.value && !historyError.value)
 
 function scoreText(score: number | null): string {
   return score !== null && Number.isFinite(score) ? score.toFixed(4) : '—'
@@ -45,7 +41,7 @@ async function handleSearch(): Promise<void> {
     return
   }
 
-  loading.value = true
+  searching.value = true
   try {
     const data = await searchKnowledge({
       query: normalizedQuery,
@@ -58,41 +54,31 @@ async function handleSearch(): Promise<void> {
     searched.value = false
     ElMessage.error(errorMessage(error))
   } finally {
-    loading.value = false
+    searching.value = false
   }
 }
 
 async function handleChat(): Promise<void> {
-  if (loading.value) return
-  const normalizedQuery = query.value.trim()
-  if (!normalizedQuery) {
-    ElMessage.warning('请输入问题')
-    return
-  }
-  loading.value = true
-  const history: ConversationMessage[] = messages.value.slice(-historyLimit).map(({ role, content }) => ({
-    role,
-    content,
-  }))
-  messages.value.push({ role: 'user', content: normalizedQuery })
+  if (!canSearch.value) return
+  const question = query.value.trim()
   query.value = ''
-  try {
-    const response = await chatWithKnowledge({ query: normalizedQuery, history })
-    messages.value.push({ role: 'assistant', content: response.answer, response })
-  } catch (error) {
-    messages.value.pop()
-    query.value = normalizedQuery
+  try { await chat.send(question) }
+  catch (error) {
+    if (messages.value.at(-1)?.content !== question) query.value = question
     ElMessage.error(errorMessage(error))
-  } finally {
-    loading.value = false
   }
 }
 
-function clearConversation(): void {
-  messages.value = []
-  query.value = ''
-  results.value = []
-  searched.value = false
+async function newConversation(): Promise<void> {
+  try {
+    await chat.create()
+    query.value = ''; results.value = []; searched.value = false
+  } catch (error) { ElMessage.error(errorMessage(error)) }
+}
+
+async function selectConversation(id: number): Promise<void> {
+  query.value = ''; results.value = []; searched.value = false
+  await chat.select(id)
 }
 </script>
 
@@ -111,15 +97,23 @@ function clearConversation(): void {
         </router-link>
       </header>
 
+      <div class="chat-layout">
+      <ChatHistory :conversations="conversations" :active-id="activeId" :busy="loading"
+        :new-disabled="loading || !ready" :remove="chat.remove" @select="selectConversation" @create="newConversation" />
+      <div class="chat-main">
+      <el-alert v-if="historyError" :title="historyError" type="error" :closable="false">
+        <el-button text @click="chat.restore">重新加载</el-button>
+      </el-alert>
+      <p v-if="!ready && busy" class="pending-answer">正在恢复历史对话…</p>
       <section class="conversation-section" aria-live="polite">
         <div class="conversation-heading">
           <h2>当前对话</h2>
-          <el-button :disabled="loading || messages.length === 0" @click="clearConversation">清空对话</el-button>
+          <el-button :disabled="loading || !ready" @click="newConversation">新建对话</el-button>
         </div>
-        <el-empty v-if="messages.length === 0" description="输入第一个问题，开始对话" />
+        <el-empty v-if="ready && !busy && !pending && !historyError && messages.length === 0" description="输入第一个问题，开始对话" />
         <article
-          v-for="(message, index) in messages"
-          :key="index"
+          v-for="message in messages"
+          :key="message.id"
           class="chat-message"
           :class="message.role === 'user' ? 'user-message' : 'assistant-message'"
         >
@@ -141,23 +135,23 @@ function clearConversation(): void {
             >
               <strong>{{ source.fileName || source.documentId }}</strong>
               <details>
-                <summary>查看引用内容</summary>
+                <summary>{{ message.restored ? '查看引用摘要' : '查看引用内容' }}</summary>
                 <dl class="source-details">
                   <div><dt>文档</dt><dd>{{ source.fileName }}</dd></div>
                   <div><dt>Chunk ID</dt><dd>{{ source.documentId }}:{{ source.chunkIndex }}</dd></div>
-                  <div><dt>Rerank Score</dt><dd>{{ scoreText(source.rerankScore) }}</dd></div>
+                  <div v-if="!message.restored"><dt>Rerank Score</dt><dd>{{ scoreText(source.rerankScore) }}</dd></div>
                 </dl>
                 <div class="chunk-content">{{ source.content }}</div>
               </details>
             </div>
           </div>
-          <details v-if="message.response" class="turn-debug">
+          <details v-if="message.response && !message.restored" class="turn-debug">
             <summary>本轮调试信息</summary>
             <p>检索问题：{{ message.response.rewrittenQuery }}</p>
             <p>召回 {{ message.response.retrievalCount }} · 重排 {{ message.response.rerankCount }} · 使用 {{ message.response.usedContextCount }} 个片段</p>
           </details>
         </article>
-        <div v-if="loading && messages[messages.length - 1]?.role === 'user'" class="pending-answer">
+        <div v-if="busy || pending" class="pending-answer">
           CampusAgent 正在查找知识库…
         </div>
       </section>
@@ -167,6 +161,7 @@ function clearConversation(): void {
           <el-form-item label="问题">
             <el-input
               v-model="query"
+              :disabled="loading || !ready || !!historyError"
               type="textarea"
               :rows="4"
               maxlength="4000"
@@ -258,6 +253,8 @@ function clearConversation(): void {
         </el-card>
       </section>
       </details>
+      </div>
+      </div>
     </section>
   </main>
 </template>
@@ -269,9 +266,13 @@ function clearConversation(): void {
 }
 
 .search-shell {
-  width: min(960px, 100%);
+  width: min(1240px, 100%);
   margin: 0 auto;
 }
+
+.chat-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 28px; }
+.chat-main { min-width: 0; }
+@media (max-width: 800px) { .chat-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
 
 .page-header,
 .result-header,

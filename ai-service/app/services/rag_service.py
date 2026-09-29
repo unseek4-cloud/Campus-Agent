@@ -67,8 +67,7 @@ class RagService:
         standalone_query = query
         if recent_history and self._query_rewrite_enabled and self._query_rewriter is not None:
             standalone_query = self._query_rewriter.rewrite(query, recent_history)
-        logger.info("original query = %s", query)
-        logger.info("rewritten query = %s", standalone_query)
+        logger.info("query rewrite applied = %s", standalone_query != query)
         run = self._retrieval.search_with_counts(
             standalone_query, self._retrieval_top_k, knowledge_base_id
         )
