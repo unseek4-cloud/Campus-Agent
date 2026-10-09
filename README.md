@@ -21,6 +21,12 @@ CampusAgent 是面向高校学生的事务智能问答与办事引导系统。�
 
 查询意图与事项匹配的分离、自动测试、真实浏览器验收和逐步启动说明见 [查询意图路由修复](docs/query-intent-routing.md)。
 
+## 对话分享：图片导出与公开分享链接
+
+问答页每条消息下方都有操作条（分享 / 复制 / 时间），点分享进入多选：可只把选中的几条消息复制为图片、导出 PNG 长图，或生成后端 token 的**免登录只读**公开链接（`#/share/<token>`，默认 30 天有效、可随时撤销）。图片由 Canvas 手绘，不依赖第三方库。
+
+启动自动执行 V8 增量迁移（`ai_conversation_share`）；接口、数据表、公开页行为、自动测试与边界见 [对话分享开发与验收说明](docs/chat-share.md)。
+
 ## 所需材料附件 / 表格模板下载
 
 管理员可在 `/admin/services` 编辑任意事项，为每项材料上传、下载、替换或删除一个可选附件；学生卡片按后台数据展示蓝色下载链接，保留中文文件名。支持 DOC、DOCX、PDF、XLS、XLSX、ZIP，默认 20 MB，复用 UUID 文件存储，不进入 RAG。
@@ -30,12 +36,13 @@ CampusAgent 是面向高校学生的事务智能问答与办事引导系统。�
 ## 项目结构
 
 ```text
-frontend/     Vue 3 + Vite + Element Plus + Axios
-backend/      Java 21 + Spring Boot 3 + MyBatis-Plus + MySQL
-ai-service/   Python + FastAPI
-docs/         项目文档
-deploy/       部署配置预留目录
-scripts/      开发和运维脚本预留目录
+frontend/             Vue 3 + Vite + Element Plus + Axios
+frontend-standalone/  原生 HTML/CSS/JS 前端（零依赖、免构建，与 frontend/ 功能等价）
+backend/              Java 21 + Spring Boot 3 + MyBatis-Plus + MySQL
+ai-service/           Python + FastAPI
+docs/                 项目文档
+deploy/               部署配置预留目录
+scripts/              开发和运维脚本预留目录
 ```
 
 ## 环境要求
@@ -49,6 +56,10 @@ scripts/      开发和运维脚本预留目录
 
 ## 启动前端
 
+仓库提供两套功能等价的前端，任选其一即可，都对接同一套后端 API。
+
+**Vue 版**（`frontend/`，需 Node.js 与依赖安装）：
+
 ```bash
 cd frontend
 npm install
@@ -56,6 +67,21 @@ npm run dev
 ```
 
 默认地址：`http://localhost:5173`。
+
+**静态版**（`frontend-standalone/`，零依赖、免构建，只需 Python 3）：
+
+```bash
+cd frontend-standalone
+python -m http.server 5500 --bind 127.0.0.1
+```
+
+Windows 也可直接双击 `frontend-standalone/start.bat`：脚本会自动挑选空闲端口、拉起后端与 AI 服务、打开浏览器，所有路径按自身位置推导，不含任何硬编码的本地路径。
+
+默认地址：`http://localhost:5500`。
+
+> ⚠️ **必须用 `http://` 访问，不要双击 `index.html`。** 用 `file://` 打开时页面没有 origin，后端 Cookie 会被浏览器丢弃，登录必然失败。
+>
+> ⚠️ **跨端口要加白名单。** 后端 CORS 只放行 `AUTH_ALLOWED_ORIGINS` 中显式列出的来源（默认 `http://localhost:5173,http://127.0.0.1:5173`）。静态版跑在 5500 时，需在 `backend/.env` 里追加 `http://localhost:5500,http://127.0.0.1:5500` 并重启后端，否则登录会返回 403。完整说明与排错见 [静态前端说明](frontend-standalone/README.md)。
 
 ## 启动 Java 后端
 

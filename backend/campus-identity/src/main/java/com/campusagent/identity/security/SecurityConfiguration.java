@@ -47,6 +47,8 @@ public class SecurityConfiguration {
                 .authorizeHttpRequests(a -> a
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/health", "/api/auth/csrf").permitAll()
+                        // 公开只读分享：随机 token 即凭证，不需要登录，也不开放写操作
+                        .requestMatchers(HttpMethod.GET, "/api/share/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login", "/api/auth/logout").permitAll()
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")
                         .requestMatchers("/api/student/**").hasRole("STUDENT")

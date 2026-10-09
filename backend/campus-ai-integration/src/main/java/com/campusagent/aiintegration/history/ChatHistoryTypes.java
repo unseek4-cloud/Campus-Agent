@@ -18,4 +18,13 @@ public final class ChatHistoryTypes {
     public record Turn(long conversationId, long userMessageId, long assistantMessageId,
                        @JsonUnwrapped ChatResponse response) { }
     public record Lease(String requestId, LocalDateTime since) { }
+    /** Owner-facing share record; the token is the whole public credential. */
+    public record Share(String token, long conversationId, String title, LocalDateTime createdAt,
+                        LocalDateTime expiresAt, int viewCount, boolean revoked, List<Long> messageIds) { }
+    /** messageIds 为空表示分享整段会话；非空表示只分享选中的消息。 */
+    public record ShareRequest(Integer ttlDays, List<Long> messageIds) { }
+    /** Public payload: no requestId, no account fields. */
+    public record SharedMessage(String role, String content, JsonNode response, LocalDateTime createdAt) { }
+    public record SharedConversation(String title, LocalDateTime createdAt, LocalDateTime expiresAt,
+                                     int viewCount, List<Long> messageIds, List<SharedMessage> messages) { }
 }
