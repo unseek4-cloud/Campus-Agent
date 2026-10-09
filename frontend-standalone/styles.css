@@ -1298,34 +1298,32 @@ body[data-auth="must-change"] #changePwdForm { display: block; }
 .auth-brand-name { font-size: 17px; font-weight: 700; letter-spacing: 0.3px; }
 .auth-brand-sub { font-size: 11.5px; color: var(--text-3); margin-top: 1px; }
 
-/* DepthText：登录页标题的立体挤出。字号、行高与立体参数都收在这几个变量里，
-   兜底文本与两行实例共用；app.js 只按变量生成层叠结构和每层颜色。
-   --dt-layers / --dt-tilt / --dt-smoothing / --dt-orbit / --dt-perspective
-   会被 app.js 读走（见 mountAuthTitle），改这里就能整体调立体感。 */
+/* BlurText：登录页标题的逐字模糊入场。字号/字重/行高与两行动效参数都收在这几个变量里，
+   兜底文本与挂载后的逐字结构共用；app.js 只负责拆字与排错，动效本身全在 CSS。
+   --bt-stagger / --bt-blur-from / --bt-shift 会被 app.js 读走
+   （见 mountAuthTitle），改这里就能整体调入场节奏。 */
 .auth-aside-title {
   --dt-font: 52px;
   --dt-weight: 900;               /* 参考图那种「黑体级」厚重感 */
-  --dt-line-height: 1.05;         /* 组件默认 0.86 是给拉丁字母的，中文上下要留空隙 */
-  --dt-line-gap: 14px;            /* 两行之间：挤出体向后延伸，别和上一行打架 */
-  --dt-face: var(--text-1);       /* 正面色：主题正文色 —— 浅色模式深墨蓝、深色模式近白，与改版前的标题同色 */
-  --dt-depth: var(--primary);     /* 挤出与投影色：品牌蓝（原来标题的渐变就是从正文色渐变到它） */
-  --dt-layers: 34;
-  --dt-depth-step: 2.4px;         /* 层间距：34 层 × 2.4px ≈ 82px 厚（实拍对比后选的最清楚一档） */
-  --dt-tilt: 7.5;                 /* 指针驱动的最大旋转角（度） */
-  --dt-smoothing: 0.14;           /* 阻尼 */
-  --dt-orbit: 0.35;               /* 空闲环绕速度（圈/秒） */
-  --dt-perspective: 900;
+  --dt-line-height: 1.16;         /* 中文上下要留空隙；同时容纳入场时 blurTextLine 的 ±14px 位移 */
+  --dt-line-gap: 16px;            /* 两行之间的固定间距 */
+  --bt-stagger: 90ms;             /* 每个字的入场间隔；中文比原版拉丁字母调慢一档更从容 */
+  --bt-blur-from: 10px;           /* 起始模糊半径（原版默认值） */
+  --bt-shift: 14px;               /* 起始垂直位移：中文行盒高，位移比原版 50px 收敛 */
   display: flow-root;
   font-size: var(--dt-font);
   font-weight: var(--dt-weight);
-  color: var(--dt-face);          /* 兜底文本（脚本没跑时）的颜色 */
+  line-height: var(--dt-line-height);
+  color: var(--text-1);           /* 兜底文本（脚本没跑时）的颜色 */
   margin-bottom: 28px;
 }
+/* 兜底：两行文本原样显示 */
 .auth-title-line { display: block; }
-/* 两行之间留出挤出体的位置 */
-.auth-aside-title .depth-text + .depth-text { margin-top: var(--dt-line-gap); }
-/* 配色不写死：正面取 --text-1、挤出取 --primary，两套主题各自解析，
-   等于把原来标题「正文色 → 品牌蓝」的渐变换成了立体的侧面（改色只改 --dt-face/--dt-depth）。 */
+/* 挂载后：一行的逐字容器。行距由 .blur-text__line 的 margin-top 定，
+   所以两个类都归零 margin，避免与 --dt-line-gap 叠加。 */
+.auth-title-line,
+.blur-text__line { margin: 0; }
+.blur-text__line + .blur-text__line { margin-top: var(--dt-line-gap); }
 
 .auth-points { list-style: none; display: flex; flex-direction: column; gap: 16px; }
 .auth-points li { display: flex; gap: 12px; align-items: flex-start; }
@@ -1484,44 +1482,6 @@ body[data-auth="must-change"] #changePwdForm { display: block; }
 }
 .auth-caps[hidden] { display: none; }
 
-.auth-demo {
-  margin-top: 22px;
-  padding-top: 18px;
-  border-top: 1px dashed var(--border-strong);
-  font-size: 12px;
-  color: var(--text-2);
-}
-.auth-demo summary {
-  cursor: pointer;
-  font-weight: 600;
-  color: var(--text-2);
-  list-style: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  user-select: none;
-}
-.auth-demo summary::-webkit-details-marker { display: none; }
-.auth-demo summary::before { content: "▸"; color: var(--primary); transition: transform 0.2s; }
-.auth-demo[open] summary::before { transform: rotate(90deg); }
-.auth-demo .ad-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  flex-wrap: wrap;
-}
-.auth-demo .ad-role { font-size: 11.5px; color: var(--text-3); min-width: 42px; }
-.auth-demo .ad-sep { color: var(--text-3); }
-.auth-demo code {
-  background: var(--bg-3);
-  padding: 2px 7px;
-  border-radius: 5px;
-  font-size: 11.5px;
-  color: var(--primary);
-}
-.auth-demo .ad-note { margin-top: 12px; font-size: 11px; color: var(--text-3); line-height: 1.7; }
-
 /* 强制改密页的说明块与退出入口 */
 .auth-note {
   margin-bottom: 18px;
@@ -1550,7 +1510,7 @@ body[data-auth="must-change"] #changePwdForm { display: block; }
 @media (max-height: 720px) {
   .auth-screen { padding: 20px 24px; }
   .auth-card { padding: 26px 28px; }
-  .auth-aside-title { --dt-font: 40px; --dt-depth-step: 1.85px; margin-bottom: 20px; }
+  .auth-aside-title { --dt-font: 40px; --bt-shift: 10px; margin-bottom: 20px; }
   .auth-brand { margin-bottom: 24px; }
 }
 
@@ -2665,65 +2625,88 @@ body[data-drawer="open"] .sm-scrim {
   .sm-scrim { transition-duration: 0.05s; }
 }
 
-/* ====================== DepthText 立体挤出文字 ======================
-   移植自 React Bits DepthText（原版为 React + 同名 CSS，无第三方依赖）。
-   结构：.depth-text > .depth-text__stage > N × .depth-text__layer + .depth-text__face。
-   每层的颜色与 Z 位移由 app.js 写进行内 style（颜色是 color-mix 字符串，
-   正面色/挤出色仍引用 --dt-face / --dt-depth，所以切主题实时生效），
-   这里负责 3D 上下文、排版与两行排布。 */
-.depth-text {
+/* ====================== BlurText 逐字模糊入场 ======================
+   移植自 React Bits BlurText（原版为 React + framer-motion，无第三方依赖）。
+   结构：.blur-text > 多行 .blur-text__line > 每字一个 .blur-text__char。
+   原版用 motion 在 JS 里补间 filter/opacity/y；本项目零依赖、无构建，
+   所以改由 CSS @keyframes 补间，JS 只写 --bt-delay（第 n 个字 × stagger，
+   对应原版的 transition.delay = index * delay / 1000）与一次性触发。
+   原版的关键帧阶梯也照搬：blur(10px)/y:±50/opacity:0 → blur(5px)/y:∓5/opacity:.5
+   → blur(0)/y:0/opacity:1，两段时长各占总时长的 1/2（stepDuration 0.35s，
+   stepCount 3 → totalDuration 0.7s）。 */
+.blur-text {
+  --bt-tracking: -0.065em;        /* 沿用原版标题的紧凑字距 */
   display: block;
   width: max-content;
   max-width: 100%;
-  line-height: 0;                 /* 消掉外层行高（strut），块高就等于 stage 高 */
-  perspective: var(--depth-text-perspective, 900px);
-  perspective-origin: 50% 48%;
-  isolation: isolate;
+  /* 透明缓冲：首屏逐字入场时 blur 与位移会溢出标题盒，
+     aside 是 flex 布局，不留这点余量就会压到下面的要点列表 */
+  padding: 4px 0;
 }
-.depth-text__stage {
-  position: relative;
-  /* 原版是 inline-grid：inline 级盒子还会按父级 line-height 撑出一段 strut，
-     两行标题的行距就不等于 --dt-line-height 了。改成块级 grid（根节点宽度是
-     max-content，所以宽度与居中表现不变），行距完全由变量说了算。 */
-  display: grid;
-  place-items: center;
-  transform-style: preserve-3d;
-  transform: rotateX(-2.4deg) rotateY(3.15deg);   /* 与 app.js 的基础角度一致：JS 起来前也立着 */
-  transform-origin: 50% 50%;
-  will-change: transform;
+.blur-text__line {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  line-height: var(--dt-line-height, 1.16);
 }
-.depth-text__layer,
-.depth-text__face {
-  grid-area: 1 / 1;
+/* 逐字：默认可读（脚本没跑时不至于隐形），动画只在挂载后由 .is-in 触发 */
+.blur-text__char {
   display: inline-block;
-  font-size: var(--depth-text-font-size, var(--dt-font, 52px));
-  font-weight: var(--depth-text-font-weight, var(--dt-weight, 900));
-  line-height: var(--dt-line-height, 1.05);
-  letter-spacing: -0.065em;       /* 原版的紧凑字距 */
-  white-space: nowrap;
-  user-select: none;
-  transform-style: preserve-3d;
-  backface-visibility: hidden;
-  font-kerning: normal;
-  text-rendering: geometricPrecision;
+  letter-spacing: var(--bt-tracking, -0.065em);
+  /* 关键：负字距加在单字盒上会让中文左右各缩 ~3.25% 而互相重叠；
+     用等量负 margin 把这份「字内缩」还回去，视觉上只保留字间的紧凑感
+     （等价于原来 DepthText 把负字距加在整行文本上的效果）。 */
+  margin-right: calc(-1 * var(--bt-tracking, -0.065em));
+  will-change: transform, filter, opacity;
 }
-.depth-text__layer {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  filter: saturate(0.95) brightness(0.92);   /* 原版：挤出层整体压暗一点 */
-  pointer-events: none;
+.blur-text.is-in .blur-text__char {
+  animation: blur-text-in var(--bt-duration, 700ms) cubic-bezier(0.22, 0.61, 0.36, 1) var(--bt-delay, 0ms) both;
 }
-.depth-text__face {
-  position: relative;
-  z-index: 1;
-  color: var(--depth-text-face-color, var(--dt-face, #cfeaff));
-  text-shadow: var(--depth-text-shadow, none);
-  transform: translateZ(0.6px);   /* 正面往前 0.6px，盖住最前面那层挤出 */
+@keyframes blur-text-in {
+  0% {
+    opacity: 0;
+    filter: blur(var(--bt-blur-from, 10px));
+    transform: translateY(calc(var(--bt-shift, 14px) * -1));
+  }
+  50% {
+    opacity: 0.5;
+    filter: blur(calc(var(--bt-blur-from, 10px) * 0.5));
+    transform: translateY(calc(var(--bt-shift, 14px) * 0.33));
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
 }
-@media (hover: hover) and (pointer: fine) {
-  .depth-text { cursor: default; }
+/* direction="bottom"：从下方浮起（对应原版 direction 属性） */
+.blur-text--bottom.is-in .blur-text__char {
+  animation-name: blur-text-in-bottom;
 }
+@keyframes blur-text-in-bottom {
+  0% {
+    opacity: 0;
+    filter: blur(var(--bt-blur-from, 10px));
+    transform: translateY(var(--bt-shift, 14px));
+  }
+  50% {
+    opacity: 0.5;
+    filter: blur(calc(var(--bt-blur-from, 10px) * 0.5));
+    transform: translateY(calc(var(--bt-shift, 14px) * -0.33));
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+/* 减弱动效：不做模糊/位移补间，直接落在终态（同样不闪一下空白） */
 @media (prefers-reduced-motion: reduce) {
-  .depth-text__stage { will-change: auto; }
+  .blur-text.is-in .blur-text__char {
+    animation: none;
+    opacity: 1;
+    filter: none;
+    transform: none;
+    will-change: auto;
+  }
 }

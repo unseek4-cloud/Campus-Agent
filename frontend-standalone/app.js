@@ -158,7 +158,20 @@ const ERROR_HINTS = {
   LLM_REQUEST_FAILED: "上游大模型返回错误（常见 401/403：Key、地域或权限不匹配）。",
   DOCUMENT_BUSY: "该文档正在处理中，请等进度完成后再操作。",
   PROCESSING_QUEUE_FULL: "文档处理队列已满，请稍后重试。",
-  UNSUPPORTED_ATTACHMENT_TYPE: "附件类型不支持，请按后端允许的格式重新上传。"
+  UNSUPPORTED_ATTACHMENT_TYPE: "附件类型不支持，请按后端允许的格式重新上传。",
+  /* 以下为 ai-service 直接返回的错误码（见 app/api/error_handlers.py） */
+  VECTOR_STORE_UNAVAILABLE:
+    "AI 服务的向量库（Chroma）打不开。最常见原因是同时启动了多个 ai-service 实例，或实例长时间运行后连接失效（数据本身不会丢，向量库可由原文档重建）。处理：关掉所有 AI 服务窗口，只保留一个并重启。",
+  EMBEDDING_UNAVAILABLE:
+    "AI 服务的 Embedding 模型不可用，通常是本地模型缓存缺失且无法联网下载。处理：设 HF_ENDPOINT=https://hf-mirror.com 下载一次，或确认 HF_HUB_OFFLINE 与缓存目录是否匹配。",
+  RERANK_UNAVAILABLE:
+    "AI 服务的重排模型不可用。重排是出答案的硬前提（缺它时检索到的证据会被全部过滤，表现为“暂未找到相关信息”）。处理：确认 BAAI/bge-reranker-base 已在本地缓存，或临时关闭重排并调整阈值。",
+  DOCUMENT_EXTRACTION_FAILED:
+    "文档解析失败。若是扫描件，需要 OCR 能力：云端走千问（AI_QWEN_OCR_ENABLED=true + Key），本地走 PaddleOCR（需安装 paddleocr/paddlepaddle）。",
+  DOCUMENT_HAS_NO_TEXT: "该文档没有可提取的文本层（纯图片页），需要 OCR 支持。",
+  OCR_PAGE_LIMIT_EXCEEDED: "超过 OCR 处理页数上限（AI_OCR_MAX_PAGES_PER_DOCUMENT，默认 50 页）。",
+  UNSUPPORTED_DOCUMENT_TYPE: "暂不支持该文档格式（后端允许 pdf/docx/txt/md/xlsx/pptx/png/jpg/jpeg）。",
+  INVALID_RETRIEVAL_REQUEST: "检索参数不合法，请检查查询内容与 topK。"
 };
 function errorHint(code) { return ERROR_HINTS[code] || ""; }
 
@@ -738,172 +751,128 @@ async function settleLatticeLoader(handle, status) {
 }
 
 /* ============================================================
-   DepthText · 立体挤出文字（登录页标题）
-   移植自 React Bits DepthText（React + 同名 CSS，原版无第三方依赖）。
-   本项目零依赖、无构建，所以 rAF 与指针视差自己写，原版参数逐项保留：
-     - N 层堆叠 + 一层正面：每层 translateZ(-index * depth) 挤出，颜色按
-       平方缓动从 faceColor 混到 depthColor（color-mix），越靠后越深；
-     - 指针视差：窗口 pointermove 映射到 ±tilt 度，smoothing 阻尼跟随；
-     - 自动环绕：指针不在（或还没动过）时按 orbitSpeed 走正弦轨道；
-     - prefers-reduced-motion：只落基础角度，不开 rAF。
+   BlurText · 逐字模糊入场（登录页标题）
+   移植自 React Bits BlurText（原版为 React + framer-motion）。
+   本项目零依赖、无构建，所以原版由 motion 在 JS 里做的补间改由 CSS @keyframes
+   承担，原版参数逐项保留：
+     - animateBy：'words' 按空格切词、'letters' 逐字切；原版对空格也发一个
+       <span>（渲染成 \u00A0）并占用一个动画序号 —— 中文标题没空格，走 letters；
+     - direction：'top' 从上方落下、'bottom' 从下方浮起；
+     - delay / stepDuration：第 n 段延迟 = n × delay，单段时长 = stepDuration ×
+       (stepCount - 1)（stepCount = 关键帧数 + 1，见原版 totalDuration 的算法）；
+     - threshold / rootMargin：IntersectionObserver 触发，进场后 unobserve；
+     - easing：原版默认 easing = t => t（线性），这里默认 cubic-bezier 缓出，
+       线性在中文逐字入场时显得发涩（差异见下面 EASING 注释）。
    与 React 版的差异（都是无构建 + 中文标题带来的）：
-     - 原版一个实例一行，这里两行共用一条 rAF、两个 stage 用同一组角度，
-       否则两行各转各的，看起来不像一整块字；
-     - 指针坐标按整个 <h1> 的矩形算（原版按自身 rect），两行才会一起倾斜；
-     - 层间距走 --dt-depth-step 变量：52px 字号下取 2.4px（34 层 ≈ 82px 厚，
-       实拍对比后选的最清楚一档），矮视口字号降到 40px 时由 CSS 同步收成 1.85px；
-     - 行高 0.86 → --dt-line-height：0.86 是给拉丁字母的，中文上下要留空隙。
+     - 原版一个实例一行文本，这里两行共用一个 .blur-text 容器（各占一个
+       .blur-text__line），逐字延迟跨行连续累加，读起来是一句话而不是两段；
+     - 逐字 span 在 .blur-text__line 的 flex 容器里换行，避免中文长句溢出侧栏；
+     - 逐字时字距按每个字单独算，与原来 DepthText 的 -0.065em 紧凑字距对齐；
+     - prefers-reduced-motion：不加动画，直接落在终态。
    ============================================================ */
-const DEPTH_TEXT = {
-  layers: 34,                     // 堆叠层数（原版同名参数，上限 64）
-  depth: 2.4,                     // 每层 Z 间距(px)，见上面「层间距」说明
-  faceColor: "var(--dt-face)",    // 正面颜色：走主题变量，切主题实时生效
-  depthColor: "var(--dt-depth)",  // 挤出与投影的颜色
-  tilt: 7.5,                      // 指针驱动的最大旋转角(度)
-  pointerTracking: true,
-  smoothing: 0.14,                // 阻尼：每帧向目标角度靠拢的比例
-  perspective: 900,
-  autoOrbit: true,
-  orbitSpeed: 0.35,               // 空闲环绕速度（圈/秒）
-  shadow: true,
+const BLUR_TEXT = {
+  animateBy: "letters",           // 'words' | 'letters'（原版默认 words，中文自动走 letters）
+  direction: "top",               // 'top' | 'bottom'
+  delay: 90,                      // 每字入场间隔(ms)
+  stepDuration: 0.35,             // 单段补间时长(s)，原版默认值
+  threshold: 0.1,                 // 原版默认值
+  rootMargin: "0px",              // 原版默认值
+  blurFrom: 10,                   // 起始模糊半径(px)，原版默认值
+  shift: 14,                      // 起始垂直位移(px)。原版 50px 是拉丁字母的尺度，
+                                  // 中文行盒窄，14px 才不会和上一行打架
   className: ""
 };
-const DEPTH_TEXT_MAX_LAYERS = 64;   // 原版上限：防 DOM 爆炸
-const depthTextClamp = (value, min, max) => Math.min(Math.max(value, min), max);
+/* 原版 easing = t => t 是恒等（线性）。线性起步太硬，这里换成缓出曲线：
+   CSS 的 cubic-bezier 与 CSS 变量一起写在 .blur-text 段（styles.css）。 */
+
+/* prefers-reduced-motion：BlurText 与其他动效组件共用（原来在 DepthText 段里定义）。 */
 const motionReduced = () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
 
-/** 第 index 层的颜色：原版的平方缓动混色（index 从最深一层往前数）。 */
-function depthTextLayerColor(faceColor, depthColor, index, total) {
-  const progress = total <= 1 ? 1 : index / total;
-  const eased = progress * progress;
-  const faceMix = Math.round((1 - eased) * 72 + 4);
-  return `color-mix(in srgb, ${faceColor} ${faceMix}%, ${depthColor})`;
+/** 按 animateBy 切分：保持与原版一致的空格语义（空格也占一个动画序号）。 */
+function blurTextSegments(line, animateBy) {
+  if (animateBy === "words" && /\s/.test(line)) {
+    return line.split(/\s+/).filter(Boolean).map(word => ({ text: word, space: true }));
+  }
+  // 中文没有词边界，逐字切；Array.from 保证 emoji/代理对不被拆坏
+  return Array.from(line).map(char => ({ text: char, space: false }));
 }
 
-/* 组件结构：一行文本 → 一个 .depth-text（N 层挤出 + 一层正面）。
-   字号/字重/行高/层间距都由 CSS 变量给（styles.css 的 DepthText 段），
-   所以媒体查询改字号时不需要 JS 重新测量，只管生成结构与每层颜色。 */
-function depthTextHTML(lines, opts = {}) {
-  const o = { ...DEPTH_TEXT, ...opts };
-  const layers = depthTextClamp(Math.round(Number(o.layers) || 1), 2, DEPTH_TEXT_MAX_LAYERS);
-  const depth = depthTextClamp(Number(o.depth) || 0, 0, 12);
-  const perspective = depthTextClamp(Number(o.perspective) || 900, 300, 2000);
-  const shadow = o.shadow
-    ? `0 22px 34px color-mix(in srgb, ${o.depthColor} 36%, transparent), 0 4px 8px rgba(0, 0, 0, 0.28)`
-    : "none";
-  const vars = [
-    `--depth-text-perspective:${perspective}px`,
-    `--depth-text-face-color:${o.faceColor}`,
-    `--depth-text-depth-color:${o.depthColor}`,
-    `--depth-text-shadow:${shadow}`
-  ];
-  // 只有显式传了 depth 才写行内变量，否则交给 CSS（矮视口要按字号改层间距）
-  if (opts.depth !== undefined) vars.push(`--dt-depth-step:${depth}px`);
-  const style = vars.join(";");
-  return lines.map((line, i) => {
-    const text = escapeHtml(line);
-    const stack = Array.from({ length: layers }, (_, k) => {
-      const index = layers - k;   // 从最深一层往前排，正面最后画
-      const color = depthTextLayerColor(o.faceColor, o.depthColor, index, layers);
-      return `<span class="depth-text__layer" style="color:${color};transform:translateZ(calc(var(--dt-depth-step, 2.4px) * ${-index}))">${text}</span>`;
+/* 组件结构：两行文本 → 一个 .blur-text（每行一个 .blur-text__line，逐字一个 span）。
+   动效本身（关键帧、时长、缓动）全在 styles.css，这里只写 --bt-delay 序号延迟。 */
+function blurTextHTML(lines, opts = {}) {
+  const o = { ...BLUR_TEXT, ...opts };
+  const direction = o.direction === "bottom" ? "bottom" : "top";
+  const stepCount = 3;            // 原版：from + 两段关键帧 → times = [0, 0.5, 1]
+  const durationMs = Math.round(Math.max(0, Number(o.stepDuration) || 0) * (stepCount - 1) * 1000);
+  const staggerMs = Math.max(0, Number(o.delay) || 0);
+  const chars = [];               // 平铺所有字，跨行连续编号
+  const lineHTML = lines.map(line => {
+    const body = blurTextSegments(line, o.animateBy).map(seg => {
+      const index = chars.length;
+      chars.push(seg);
+      const gap = seg.space ? " " : "";
+      return `<span class="blur-text__char" style="--bt-delay:${index * staggerMs}ms" aria-hidden="true">${escapeHtml(seg.text)}${gap}</span>`;
     }).join("");
-    return `<span class="depth-text${o.className ? " " + o.className : ""}" data-depth-line="${i}" style="${style}" aria-hidden="true">
-      <span class="depth-text__stage">
-        ${stack}
-        <span class="depth-text__face">${text}</span>
-      </span>
-    </span>`;
+    // 每行是 block，行距交给 CSS（--dt-line-gap），所以这里不写行内 margin
+    return `<span class="blur-text__line">${body}</span>`;
   }).join("");
+  const cls = ["blur-text", direction === "bottom" ? "blur-text--bottom" : "", o.className].filter(Boolean).join(" ");
+  const style = `--bt-duration:${durationMs}ms;--bt-blur-from:${Math.max(0, Number(o.blurFrom) || 0)}px;--bt-shift:${Math.max(0, Number(o.shift) || 0)}px`;
+  // 逐字 span 都是 aria-hidden，可读文本由 <h1> 的 aria-label 提供（见 mountAuthTitle）
+  return `<span class="${cls}" style="${style}" data-blur-text>${lineHTML}</span>`;
 }
 
-/* 挂载：一条 rAF 驱动所有 stage（两行共用一组角度）。
-   返回 { ready, stages, base, kill }；reduced=true 表示按减弱动效只落静态角度。 */
-function mountDepthText(root, opts = {}) {
-  const o = { ...DEPTH_TEXT, ...opts };
-  const stages = $$(".depth-text__stage", root);
-  if (!stages.length) return null;
+/* 挂载：IntersectionObserver 进场后加 .is-in 触发 CSS 动画。
+   返回 { root, chars, kill }；reduced=true 时直接标成已进场（不加动画）。 */
+function mountBlurText(root, opts = {}) {
+  const o = { ...BLUR_TEXT, ...opts };
+  const el = $(".blur-text", root);
+  if (!el) return null;
+  const chars = $$(".blur-text__char", el);
+  let observer = null;
+  let fallbackTimer = 0;
 
-  const tilt = depthTextClamp(Number(o.tilt) || 0, 0, 12);
-  const smoothing = depthTextClamp(Number(o.smoothing) || 0.14, 0.02, 0.35);
-  const orbitSpeed = depthTextClamp(Number(o.orbitSpeed) || 0, 0, 2);
-  const finePointer = window.matchMedia?.("(hover: hover) and (pointer: fine)")?.matches === true;
-  const trackPointer = !!o.pointerTracking && finePointer && !motionReduced();
-
-  const base = { x: -tilt * 0.32, y: tilt * 0.42 };   // 原版基础角度：字面本身就带一点立体
-  const current = { ...base };
-  const target = { ...base };
-  let frame = 0;
-  let activePointer = false;
-  const startTime = performance.now();
-
-  const apply = () => {
-    const transform = `rotateX(${current.x.toFixed(3)}deg) rotateY(${current.y.toFixed(3)}deg)`;
-    stages.forEach(stage => { stage.style.transform = transform; });
-  };
-
-  const onMove = event => {
-    const rect = root.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    activePointer = true;
-    const x = depthTextClamp((event.clientX - (rect.left + rect.width / 2)) / (rect.width * 0.8), -1, 1);
-    const y = depthTextClamp((event.clientY - (rect.top + rect.height / 2)) / (rect.height * 0.8), -1, 1);
-    target.x = base.x - y * tilt;
-    target.y = base.y + x * tilt;
-  };
-  const onLeave = () => {
-    activePointer = false;
-    target.x = base.x;
-    target.y = base.y;
+  const reveal = () => {
+    if (observer) { observer.disconnect(); observer = null; }
+    if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = 0; }
+    el.classList.add("is-in");
+    if (typeof o.onAnimationComplete === "function") {
+      // 等最后一个字的延迟 + 单段时长走完（原版是等最后一个 motion.span 的 onAnimationComplete）
+      const duration = parseFloat(el.style.getPropertyValue("--bt-duration")) || 700;
+      const last = Math.max(0, chars.length - 1) * (Number(o.delay) || 0);
+      setTimeout(o.onAnimationComplete, duration + last + 30);
+    }
   };
 
   const kill = () => {
-    if (trackPointer) {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerleave", onLeave);
-      window.removeEventListener("blur", onLeave);
-    }
-    cancelAnimationFrame(frame);
-    frame = 0;
+    if (observer) { observer.disconnect(); observer = null; }
+    if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = 0; }
+    el.classList.remove("is-in");
   };
 
-  const handle = { ready: true, stages, base, current, target, trackPointer, reduced: false, kill, apply };
-
-  if (motionReduced()) {          // 系统要求减弱动效：只落基础角度，不开 rAF
-    handle.reduced = true;
-    apply();
-    return handle;
+  if (motionReduced()) {
+    el.classList.add("is-in");    // CSS 的 reduced-motion 分支会把动画降级成终态
+  } else if (typeof IntersectionObserver === "function") {
+    observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) reveal();
+    }, { threshold: o.threshold, rootMargin: o.rootMargin });
+    observer.observe(el);
+    // 兜底：登录页是首屏，若 IO 因容器/尺寸异常没回调，1.2s 后也要出字
+    fallbackTimer = setTimeout(reveal, 1200);
+  } else {
+    reveal();
   }
 
-  if (trackPointer) {
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerleave", onLeave);
-    window.addEventListener("blur", onLeave);
-  }
-
-  const tick = now => {
-    if ((!trackPointer || !activePointer) && o.autoOrbit) {
-      const orbit = ((now - startTime) / 1000) * orbitSpeed * Math.PI * 2;
-      const amount = trackPointer ? 0.18 : 0.55;   // 有指针能力时轻轻飘，纯触摸设备飘得明显些
-      target.x = base.x + Math.sin(orbit) * tilt * amount;
-      target.y = base.y + Math.cos(orbit * 0.85) * tilt * amount;
-    }
-    current.x += (target.x - current.x) * smoothing;
-    current.y += (target.y - current.y) * smoothing;
-    apply();
-    frame = requestAnimationFrame(tick);
-  };
-  apply();
-  frame = requestAnimationFrame(tick);
-  return handle;
+  return { root: el, chars, reveal, kill };
 }
 
-/* ---------- 登录页标题：把 <h1> 里两行文本换成两行立体挤出文字 ---------- */
+/* ---------- 登录页标题：把 <h1> 里两行文本换成逐字模糊入场 ---------- */
 let authTitleHandle = null;
 
 /* 标题的两行文本：首次从 index.html 的兜底 <span> 读；
-   重挂时兜底文本已经被替换，改从 data-depth-lines 取回原文。 */
+   重挂时兜底文本已经被替换，改从 data-title-lines 取回原文。 */
 function authTitleLines(title) {
-  const saved = title.dataset.depthLines;
+  const saved = title.dataset.titleLines;
   if (saved) {
     try {
       const lines = JSON.parse(saved);
@@ -918,21 +887,19 @@ function mountAuthTitle() {
   if (!title) return null;
   const lines = authTitleLines(title);
   if (!lines.length) return null;
-  // 立体参数也走 CSS 变量：改字号/层间距/倾斜都不用动 JS
+  // 入场节奏也走 CSS 变量：改逐字间隔/模糊半径/位移都不用动 JS
   const cs = getComputedStyle(title);
   const num = name => parseFloat(cs.getPropertyValue(name)) || 0;
   const opts = {
-    layers: num("--dt-layers") || DEPTH_TEXT.layers,
-    tilt: num("--dt-tilt") || DEPTH_TEXT.tilt,
-    smoothing: num("--dt-smoothing") || DEPTH_TEXT.smoothing,
-    orbitSpeed: num("--dt-orbit") || DEPTH_TEXT.orbitSpeed,
-    perspective: num("--dt-perspective") || DEPTH_TEXT.perspective
+    delay: num("--bt-stagger") || BLUR_TEXT.delay,
+    blurFrom: num("--bt-blur-from") || BLUR_TEXT.blurFrom,
+    shift: num("--bt-shift") || BLUR_TEXT.shift
   };
   authTitleHandle?.kill();
-  title.dataset.depthLines = JSON.stringify(lines);
+  title.dataset.titleLines = JSON.stringify(lines);
   title.setAttribute("aria-label", lines.join(""));
-  title.innerHTML = depthTextHTML(lines, opts);
-  authTitleHandle = mountDepthText(title, opts);
+  title.innerHTML = blurTextHTML(lines, opts);
+  authTitleHandle = mountBlurText(title, opts);
   return authTitleHandle;
 }
 
@@ -967,7 +934,7 @@ let dashboardStats = { total: 0, success: 0, failed: 0, processing: 0, chunks: 0
    sessionStorage 里的 ca-user 只用于避免界面闪烁，不作为登录凭证。 */
 document.addEventListener("DOMContentLoaded", async () => {
   initTheme();
-  initAuthTitle();          // DepthText：登录页标题立体挤出（首屏立即挂，不等鉴权结果）
+  initAuthTitle();          // BlurText：登录页标题逐字模糊入场（首屏立即挂，不等鉴权结果）
   bindAuthForms();
   // 公开分享页优先：不需要登录，也不调用 /api/auth/me
   if (isShareHash()) { renderPublicShare(shareTokenFromHash()); return; }

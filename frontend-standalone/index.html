@@ -42,9 +42,9 @@
           </div>
         </div>
 
-        <!-- 标题：DepthText 立体挤出（React Bits 移植，见 app.js 的 DepthText 段）
+        <!-- 标题：BlurText 逐字模糊入场（React Bits 移植，见 app.js 的 BlurText 段）
              这两行 <span> 是兜底文本：脚本没执行时按普通标题显示，
-             挂载成功后由 JS 换成两行 34 层堆叠的立体字。 -->
+             挂载成功后由 JS 拆成逐字 <span>，按 blur + 位移 + 透明度逐个入场。 -->
         <h1 class="auth-aside-title" id="authTitle">
           <span class="auth-title-line">高校事务智能问答</span>
           <span class="auth-title-line">与办事引导系统</span>
@@ -103,14 +103,6 @@
           </button>
 
           <div class="auth-caps" id="loginCaps" hidden>大写锁定已开启</div>
-
-          <details class="auth-demo">
-            <summary>本地演示账号</summary>
-            <div class="ad-row"><span class="ad-role">管理员</span><code>admin</code><span class="ad-sep">/</span><code>123456</code></div>
-            <div class="ad-row"><span class="ad-role">学生</span><code>20260001</code><span class="ad-sep">/</span><code>123456</code></div>
-            <div class="ad-row"><span class="ad-role">学生</span><code>20260002</code><span class="ad-sep">/</span><code>20260002123</code></div>
-            <div class="ad-note">来自本地开发库 <code>campus_agent</code>。首次登录的账号会先进入强制改密页；正式部署前请删除该提示块。</div>
-          </details>
         </form>
 
         <!-- 首次登录强制改密
