@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="chat-workspace.css" />
 </head>
 <body data-auth="pending">
   <!-- ===== 登录页 =====
@@ -193,12 +194,11 @@
       <nav class="nav" id="nav">
         <div class="nav-group">
           <div class="nav-label">工作台</div>
-          <a class="nav-item" data-route="dashboard">
-            <span class="nav-ico">▣</span><span>概览仪表盘</span>
-          </a>
           <a class="nav-item" data-route="qa">
             <span class="nav-ico">✦</span><span>智能问答</span>
-            <span class="nav-badge">核心</span>
+          </a>
+          <a class="nav-item" data-route="dashboard">
+            <span class="nav-ico">▣</span><span>事务概览</span>
           </a>
           <a class="nav-item" data-route="search">
             <span class="nav-ico">⌕</span><span>政策检索</span>
@@ -232,6 +232,11 @@
           <a class="nav-item" data-route="settings">
             <span class="nav-ico">◍</span><span>系统设置</span>
           </a>
+        </div>
+
+        <div class="nav-group chat-history-group" id="chatHistoryGroup">
+          <div class="history-heading"><span class="nav-label">最近对话</span><button class="history-new" type="button" onclick="newConversation()" aria-label="新建对话" title="新建对话">＋</button></div>
+          <div id="convList" class="conv-list" aria-label="历史会话"></div>
         </div>
       </nav>
 
@@ -268,7 +273,6 @@
             <input type="text" placeholder="全局搜索政策、事项、问答…" id="globalSearch" />
             <kbd>⌘K</kbd>
           </div>
-          <button class="icon-btn" title="通知">◷</button>
           <button class="icon-btn" title="主题切换" id="themeToggle">◐</button>
         </div>
       </header>
@@ -290,6 +294,8 @@
   <div class="toast-host" id="toastHost"></div>
 
   <script src="data.js"></script>
+  <script src="service-progress.js"></script>
+  <script src="service-guide.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

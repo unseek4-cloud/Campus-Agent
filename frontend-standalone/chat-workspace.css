@@ -1,0 +1,143 @@
+/* The chat is the primary workspace; colors and surfaces inherit the existing theme. */
+[hidden] { display: none !important; }
+.main, .viewport, .nav { min-height: 0; }
+.topbar { flex-shrink: 0; }
+body[data-route="qa"] .search-pill { display: none; }
+body[data-route="qa"] .topbar { border-bottom-color: transparent; background: transparent; }
+.qa-viewport { padding: 0; overflow: hidden; }
+.qa-viewport .qa-layout { display: flex; height: 100%; min-height: 0; gap: 0; }
+.qa-viewport .qa-chat { flex: 1; min-width: 0; min-height: 0; border: 0; border-radius: 0; background: transparent; }
+.qa-viewport .qa-chat-head { flex: 0 0 auto; padding: 8px 28px 12px; border: 0; min-height: 46px; gap: 12px; }
+.qa-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.qa-viewport .session-state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; color: var(--text-2); font-size: 13px; }
+.qa-viewport .qa-chat-body { min-height: 0; padding: 24px max(28px, calc((100% - 860px) / 2)); gap: 32px; scroll-padding: 24px; }
+.qa-viewport .msg { width: 100%; max-width: 100%; min-width: 0; overflow-wrap: anywhere; }
+.qa-viewport .msg.user { width: fit-content; max-width: 78%; }
+.qa-viewport .msg-bubble { font-size: 14px; line-height: 1.9; }
+.qa-viewport .msg.bot > .msg-bubble { background: transparent; border: 0; padding: 0; }
+.qa-viewport .msg.user .msg-bubble { padding: 12px 18px; border-radius: 18px 18px 4px 18px; }
+.qa-empty { width: min(100% - 48px, 860px); text-align: center; margin: 0 auto 30px; }
+.qa-brand-symbol { display: inline-grid; place-items: center; width: 48px; height: 48px; margin-bottom: 16px; color: var(--primary); font-size: 28px; border: 1px solid var(--border-strong); background: linear-gradient(135deg, var(--primary-glow), var(--tag-violet)); border-radius: 16px; }
+.qa-empty h1 { color: var(--text-1); font-size: clamp(24px, 2.5vw, 34px); letter-spacing: -.6px; font-weight: 600; }
+.qa-empty p { color: var(--text-2); margin-top: 12px; font-size: 14px; }
+.qa-viewport .qa-input-area { flex: 0 0 auto; width: min(100% - 56px, 860px); padding: 14px 0 18px; margin: 0 auto; border: 0; background: transparent; }
+.qa-viewport .qa-input-wrap { border: 1px solid var(--border-strong); border-radius: 23px; padding: 18px 18px 16px 22px; gap: 16px; background: var(--bg-1); box-shadow: 0 8px 32px -20px var(--primary); }
+.qa-viewport .qa-input-wrap:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); }
+.qa-viewport .qa-input { min-height: 28px; max-height: 160px; line-height: 28px; font-size: 15px; overflow-y: auto; }
+.qa-viewport .qa-input::placeholder { color: var(--text-3); }
+.qa-viewport .qa-send { width: 36px; height: 36px; border-radius: 50%; font-size: 22px; }
+.qa-input-foot { display: flex; justify-content: space-between; gap: 12px; padding: 10px 8px 0; font-size: 11px; color: var(--text-3); }
+.qa-input-foot #chatStatus { color: var(--primary); flex-shrink: 0; }
+.qa-starters { display: none; }
+.qa-viewport .qa-layout.is-empty .qa-chat { justify-content: center; padding-bottom: clamp(24px, 10vh, 100px); }
+.qa-viewport .qa-layout.is-empty .qa-chat-body { display: none; }
+.qa-layout.is-empty .qa-starters { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin: 2px 24px 0; }
+.qa-suggestion { font: inherit; font-size: 12px; background: var(--glass); border: 1px solid var(--border); color: var(--text-2); border-radius: 12px; padding: 10px 14px; cursor: pointer; transition: border-color .2s, background .2s; }
+.qa-suggestion span { color: var(--primary); margin-right: 3px; }
+.qa-suggestion:hover { background: var(--primary-glow); border-color: var(--primary); color: var(--text-1); }
+.qa-suggestion:disabled { opacity: .5; cursor: wait; }
+.qa-viewport .share-bar { flex: 0 0 auto; width: min(100% - 56px, 860px); margin: 8px auto 0; }
+.msg-debug { font-size: 11px; color: var(--text-3); margin-top: 10px; }
+.msg-debug summary { cursor: pointer; width: fit-content; }
+.msg-debug .msg-extra { display: block; padding: 10px 12px; background: var(--glass); border-radius: 8px; margin-top: 8px; }
+.chat-loading { font-size: 13px; color: var(--text-2); text-align: center; padding: 20px; }
+.chat-loading .link-btn { display: block; margin: 12px auto 0; }
+.chat-error { color: var(--danger); }
+.history-heading { display: flex; justify-content: space-between; align-items: center; padding-right: 8px; }
+.history-heading .nav-label { padding-bottom: 0; }
+.history-new { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font-size: 20px; cursor: pointer; }
+.history-new:hover { background: var(--glass-2); color: var(--primary); }
+.chat-history-group { border-top: 1px solid var(--border); padding-top: 15px; }
+.chat-history-group .conv-list { display: grid; gap: 4px; margin-top: 12px; }
+.chat-history-group .conv-item { display: flex; align-items: center; gap: 2px; padding: 0; border: 1px solid transparent; background: transparent; border-radius: 10px; min-width: 0; }
+.chat-history-group .conv-item:hover { background: var(--glass); }
+.chat-history-group .conv-item.on { background: var(--primary-glow); border-color: var(--border-strong); }
+.chat-history-group .conv-main { flex: 1; min-width: 0; font: inherit; border: 0; background: transparent; color: var(--text-2); text-align: left; cursor: pointer; padding: 10px 11px; }
+.chat-history-group .conv-title { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12.5px; }
+.chat-history-group .conv-time { display: block; color: var(--text-3); font-size: 10px; margin-top: 3px; }
+.chat-history-group .conv-del { background: transparent; color: var(--text-3); opacity: 0; border: 0; font-size: 18px; cursor: pointer; padding: 5px 8px; }
+.chat-history-group .conv-item:hover .conv-del, .chat-history-group .conv-item:focus-within .conv-del { opacity: 1; }
+.history-empty { font-size: 12px; color: var(--text-3); padding: 10px 12px; }
+.sidebar.collapsed .chat-history-group { display: none; }
+/* Restore the structured, interactive V1.1 guide in the same blue/purple glass style. */
+.service-guide { margin-top: 16px; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--bg-1); overflow: hidden; padding: 0; }
+.guide-heading { padding: 22px 22px 14px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.guide-eyebrow { color: var(--primary); font-size: 11px; }
+.guide-heading h3 { font-size: 19px; margin-top: 5px; }
+.guide-heading p { color: var(--text-3); font-size: 12px; margin-top: 5px; }
+.guide-count { color: var(--primary); background: var(--primary-glow); padding: 6px 11px; font-size: 12px; border-radius: 20px; white-space: nowrap; }
+.guide-notice { font-size: 12px; line-height: 1.7; padding: 10px 12px; margin: 0 22px 12px; background: var(--tag-amber); color: var(--warn); border-radius: 8px; }
+.guide-boundary { font-size: 11px; color: var(--text-3); line-height: 1.8; margin: 0 22px 12px; }
+.guide-section { padding: 14px 22px; }
+.guide-section h4 { font-size: 14px; margin: 0 0 12px; }
+.guide-section h4 small { font-size: 11px; color: var(--text-3); font-weight: 400; margin-left: 8px; }
+.guide-progress-heading { display: flex; justify-content: space-between; color: var(--text-2); font-size: 11px; margin-bottom: 8px; }
+.guide-progress-heading b { color: var(--primary); }
+.guide-progress-track { height: 5px; background: var(--bg-3); overflow: hidden; border-radius: 5px; }
+.guide-progress-track > div { height: 100%; background: linear-gradient(90deg, var(--primary), var(--primary-2)); transition: width .25s ease; }
+.guide-timeline { list-style: none; padding: 0; margin: 22px 0 18px; }
+.guide-step { display: flex; gap: 13px; padding: 0 0 18px; position: relative; }
+.guide-step:not(:last-child)::before { content: ''; position: absolute; top: 28px; bottom: 0; width: 1px; left: 13px; background: var(--border-strong); }
+.guide-step-marker { display: grid; place-items: center; flex: 0 0 27px; height: 27px; border: 1px solid var(--border-strong); color: var(--text-3); border-radius: 50%; font-size: 11px; background: var(--bg-1); z-index: 1; }
+.guide-step > div { padding-top: 3px; min-width: 0; }
+.guide-step b { font-weight: 500; font-size: 13px; color: var(--text-2); }
+.guide-step > div > span { display: inline-block; margin-left: 10px; font-size: 10px; color: var(--text-3); }
+.guide-step p { font-size: 12px; line-height: 1.8; margin-top: 5px; color: var(--text-3); }
+.guide-step.is-current .guide-step-marker { color: white; background: linear-gradient(135deg, var(--primary), var(--primary-2)); border-color: transparent; box-shadow: 0 0 0 4px var(--primary-glow); }
+.guide-step.is-current b, .guide-step.is-current > div > span { color: var(--primary); }
+.guide-step.is-done .guide-step-marker { background: var(--tag-green); color: var(--success); border-color: var(--success); }
+.guide-step.is-done > div > span { color: var(--success); }
+.guide-current { padding: 18px; margin-top: 16px; background: var(--primary-glow); border: 1px solid var(--border-strong); border-radius: 12px; }
+.guide-flow { margin-top: 16px; font-size: 12px; color: var(--text-2); }
+.guide-flow summary { cursor: pointer; }
+.guide-current h4 { font-size: 16px; margin: 8px 0 12px; }
+.guide-current > p { color: var(--text-2); font-size: 13px; line-height: 1.8; }
+.guide-step-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
+.guide-step-facts dt { font-size: 11px; color: var(--text-3); margin-bottom: 4px; }
+.guide-step-facts dd { color: var(--text-2); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.guide-step-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.guide-step-actions .btn { white-space: normal; }
+.btn-primary:hover { background: linear-gradient(135deg, var(--primary), var(--primary-2)); }
+.guide-completed { background: var(--tag-green); }
+.guide-completed h4 { color: var(--success); }
+.guide-completed .btn { margin-top: 14px; }
+.guide-reset { margin-top: 14px; border: 0; background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
+.guide-materials { display: grid; gap: 8px; }
+.guide-material { display: flex; gap: 12px; border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--glass); }
+.guide-material:has(input:checked) { background: var(--primary-glow); }
+.guide-material input { accent-color: var(--primary); width: 16px; height: 16px; margin-top: 3px; cursor: pointer; flex-shrink: 0; }
+.guide-material strong { font-size: 12px; font-weight: 500; }
+.guide-material small { color: var(--text-3); font-size: 10px; margin-left: 7px; font-weight: 400; }
+.guide-material p { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+.guide-material-dot { color: var(--primary); }
+.guide-download { display: inline-block; margin-top: 6px; font-size: 12px; }
+.guide-details { border-top: 1px solid var(--border); margin: 8px 22px 0; padding: 14px 0; color: var(--text-2); font-size: 12px; }
+.guide-details summary { cursor: pointer; color: var(--text-2); }
+.guide-details ul { margin: 12px 0; padding-left: 18px; line-height: 1.8; }
+.guide-source { background: var(--glass); border-top: 1px solid var(--border); padding: 12px 22px; font-size: 11px; color: var(--text-3); }
+.guide-source a { margin-left: 10px; }
+.guide-footer { display: flex; gap: 10px; flex-wrap: wrap; padding: 16px 22px; border-top: 1px solid var(--border); }
+@media (hover: none) { .chat-history-group .conv-del { opacity: 1; } }
+@media (max-width: 768px) {
+  .qa-viewport { padding: 0; }
+  .qa-viewport .qa-chat-head { padding: 8px 16px; }
+  .qa-viewport .qa-chat-body { padding: 18px 16px; gap: 26px; }
+  .qa-viewport .qa-input-area, .qa-viewport .share-bar { width: calc(100% - 24px); }
+  .qa-viewport .qa-input-wrap { border-radius: 18px; padding: 14px 12px 12px 16px; gap: 10px; }
+  .qa-empty { width: calc(100% - 32px); margin-bottom: 20px; }
+  .qa-empty h1 { font-size: 24px; }
+  .qa-empty p { font-size: 13px; }
+  .qa-viewport .qa-layout.is-empty .qa-chat { padding-bottom: 40px; }
+  .qa-suggestion { font-size: 11px; padding: 8px 10px; }
+  .qa-input-foot { font-size: 10px; }
+  .qa-viewport .session-state { max-width: 40%; }
+  .qa-head-actions { gap: 3px; }
+  .qa-head-actions .btn { font-size: 11px; padding: 6px 8px; }
+  .guide-heading { padding: 18px 16px 12px; }
+  .guide-notice, .guide-boundary { margin-left: 16px; margin-right: 16px; }
+  .guide-section { padding: 12px 16px; }
+  .guide-current { padding: 14px; }
+  .guide-step-facts { grid-template-columns: 1fr; }
+  .guide-details { margin-left: 16px; margin-right: 16px; }
+  .guide-source, .guide-footer { padding-left: 16px; padding-right: 16px; }
+}

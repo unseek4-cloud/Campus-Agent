@@ -7,6 +7,13 @@
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const M = window.MOCK;
+// Storage is optional; restrictive browser settings must not prevent login or a guide.
+const tabValues = new Map();
+const tabStorage = {
+  getItem(key) { try { return sessionStorage.getItem(key); } catch { return tabValues.get(key) ?? null; } },
+  setItem(key, value) { tabValues.set(key, value); try { sessionStorage.setItem(key, value); } catch { } },
+  removeItem(key) { tabValues.delete(key); try { sessionStorage.removeItem(key); } catch { } }
+};
 
 /* ---------- API 基础配置 ----------
    后端 Cookie（CAMPUS_AUTH / XSRF-TOKEN）都是 SameSite=Lax：
@@ -29,9 +36,9 @@ const csrfCacheKey = "ca-csrf";
 let csrfRequest = null;
 
 function readCsrf() {
-  try { return JSON.parse(sessionStorage.getItem(csrfCacheKey) || "null"); } catch (e) { return null; }
+  try { return JSON.parse(tabStorage.getItem(csrfCacheKey) || "null"); } catch (e) { return null; }
 }
-function clearCsrf() { sessionStorage.removeItem(csrfCacheKey); }
+function clearCsrf() { tabStorage.removeItem(csrfCacheKey); }
 
 async function ensureCsrf(force = false) {
   if (!force) {
@@ -53,7 +60,7 @@ async function ensureCsrf(force = false) {
     const token = json?.data?.token;
     if (!token) throw new Error("页面验证令牌为空，请刷新后重试");
     const value = { token, headerName: json?.data?.headerName || CSRF_HEADER_FALLBACK };
-    sessionStorage.setItem(csrfCacheKey, JSON.stringify(value));
+    tabStorage.setItem(csrfCacheKey, JSON.stringify(value));
     return value;
   })().finally(() => { csrfRequest = null; });
   return csrfRequest;
@@ -107,7 +114,7 @@ async function apiRequest(method, path, body, isForm = false, retry = true) {
     if (!sessionExpiredHandled) {
       sessionExpiredHandled = true;
       toast("登录已失效，请重新登录", "warn");
-      sessionStorage.removeItem("ca-user");
+      tabStorage.removeItem("ca-user");
       currentUser = null;
       setTimeout(() => { sessionExpiredHandled = false; showLogin(); }, 600);
     }
@@ -122,7 +129,7 @@ async function apiRequest(method, path, body, isForm = false, retry = true) {
   if (res.status === 403 && code === "MUST_CHANGE_PASSWORD") {
     if (currentUser) {
       currentUser.mustChangePassword = true;
-      sessionStorage.setItem("ca-user", JSON.stringify(currentUser));
+      tabStorage.setItem("ca-user", JSON.stringify(currentUser));
     }
     showChangePassword();
     const needChange = new Error(json?.message || "请先修改初始密码后再使用系统。");
@@ -941,11 +948,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   try {
     const me = await apiGet("/api/auth/me");
     currentUser = mapUser(me);
-    sessionStorage.setItem("ca-user", JSON.stringify(currentUser));
+    tabStorage.setItem("ca-user", JSON.stringify(currentUser));
     if (currentUser.mustChangePassword) showChangePassword();
     else enterApp();
   } catch (e) {
-    sessionStorage.removeItem("ca-user");
+    tabStorage.removeItem("ca-user");
     currentUser = null;
     showLogin(e.code === "NETWORK" ? e.message : "");
   }
@@ -1081,7 +1088,7 @@ async function doLogin() {
     if (!result?.success || !result.user) throw new Error("后端返回的登录结果不完整");
     currentUser = mapUser(result.user);
     if (result.needChangePassword !== undefined) currentUser.mustChangePassword = !!result.needChangePassword;
-    sessionStorage.setItem("ca-user", JSON.stringify(currentUser));
+    tabStorage.setItem("ca-user", JSON.stringify(currentUser));
     // 后端在登录成功时会清空 XSRF-TOKEN Cookie，本地缓存必须同步失效
     clearCsrf();
     $("#loginPass").value = "";
@@ -1156,7 +1163,7 @@ async function submitChangePassword() {
     await apiPost("/api/auth/change-password", { oldPassword, newPassword });
     // 后端已撤销当前会话（credential_stamp 失效），本地状态一并清掉
     clearCsrf();
-    sessionStorage.removeItem("ca-user");
+    tabStorage.removeItem("ca-user");
     const username = currentUser?.username || "";
     currentUser = null;
     ["#pwdOld", "#pwdNew", "#pwdConfirm"].forEach((sel) => { $(sel).value = ""; });
@@ -1166,7 +1173,7 @@ async function submitChangePassword() {
   } catch (e) {
     setChangePwdBusy(false);
     if (e.code === "AUTH_REQUIRED") {
-      sessionStorage.removeItem("ca-user");
+      tabStorage.removeItem("ca-user");
       currentUser = null;
       showLogin("会话已失效，请重新登录。");
       return;
@@ -1193,10 +1200,15 @@ function enterApp() {
   initTopbar();
   initLogout();
   initDrawer();             // StaggeredMenu 式移动端抽屉（桌面端不受影响）
-  loadWorkbench();
-  const { route } = parseHashRoute();
-  navigate(ROUTES[route] ? route : "dashboard");
-  applyDeepLink();          // #/qa?conversation=<id> 直接回到该会话
+  window.CampusGuide.setUser(currentUser.id, isAdmin());
+  resetWorkbenchOwner(currentUser.id);
+  if (isAdmin()) loadWorkbench();
+  const { route, params } = parseHashRoute();
+  navigate(ROUTES[route] ? route : homeRoute(), { preserveHash: true });
+  if (currentRoute === "qa") {
+    const id = Number(params.get("conversation")) || rememberedConversation();
+    if (id) openConversation(id);
+  }          // #/qa?conversation=<id> 直接回到该会话
 }
 
 async function logout() {
@@ -1204,9 +1216,17 @@ async function logout() {
     await apiPost("/api/auth/logout", {});
   } catch (e) { /* 登出失败也要清掉本地状态（后端会话可能已失效） */ }
   clearCsrf();
-  sessionStorage.removeItem("ca-user");
+  tabStorage.removeItem("ca-user");
   currentUser = null;
   chatConversationId = null;
+  chatRequestGeneration++;
+  chatBusy = false;
+  chatGeneration++;
+  clearTimeout(chatPollTimer);
+  window.CampusGuide.setUser(null);
+  resetWorkbenchOwner(null);
+  history.replaceState(null, "", location.pathname);
+  $("#convList").innerHTML = "";
   showLogin();
 }
 window.logout = logout;
@@ -1244,20 +1264,23 @@ function initNav() {
     group.style.display = group.dataset.navRole === role ? "" : "none";
   });
   // 工作台/问答等公共入口之前的角色分组标签也一并隐藏（避免空分组）
-  $$(".nav-group").forEach(group => {
+  $$(".nav-group:not(.chat-history-group)").forEach(group => {
     const items = $$(".nav-item", group).filter(el => el.closest(".nav-group").style.display !== "none");
     if (!items.length) group.style.display = "none";
   });
   $$(".nav-item").forEach(el => {
-    el.addEventListener("click", e => {
+    el.onclick = e => {
       e.preventDefault();
       navigate(el.dataset.route);
-      if (window.innerWidth <= 768) closeDrawer();   // 移动端：走 StaggeredMenu 式收起
-    });
+      if (window.innerWidth <= 768) closeDrawer();
+    };
   });
 }
 
+let topbarBound = false;
 function initTopbar() {
+  if (topbarBound) return;
+  topbarBound = true;
   $("#sidebarToggle").addEventListener("click", () => {
     if (window.innerWidth <= 768) toggleDrawer();
     else {
@@ -1277,35 +1300,44 @@ function initTopbar() {
   document.addEventListener("keydown", e => {
     if ((e.metaKey || e.ctrlKey) && e.key === "k") {
       e.preventDefault();
-      $("#globalSearch").focus();
+      (currentRoute === "qa" ? $("#qaInput") : $("#globalSearch"))?.focus();
     }
   });
 }
 
 /* ---------- 路由核心 ---------- */
-function navigate(route) {
+function homeRoute() { return isAdmin() ? "dashboard" : "qa"; }
+function navigate(route, { preserveHash = false } = {}) {
   // 路由守卫：处于强制改密状态的用户只能停留在改密页，
   // 否则每个业务接口都会返回 403 MUST_CHANGE_PASSWORD，页面只会一片报错。
   if (currentUser && currentUser.mustChangePassword) {
     showChangePassword();
     return;
   }
-  if (!ROUTES[route]) route = "dashboard";
+  if (!ROUTES[route]) route = homeRoute();
   // 前端路由守卫：与后端 Spring Security 的角色边界保持一致（只是体验优化，不是安全措施）
   const needRole = ROUTES[route].role;
   if (needRole && currentUser?.role !== needRole) {
     toast(needRole === "admin" ? "该功能仅管理员可用" : "该功能仅学生账号可用", "warn");
-    route = "dashboard";
+    route = homeRoute();
   }
+  chatGeneration++;
+  clearTimeout(chatPollTimer);
+  chatLoading = false;
   currentRoute = route;
-  location.hash = "/" + route;
+  if (!preserveHash || !location.hash) {
+    const method = document.body.dataset.route && document.body.dataset.route !== route ? 'pushState' : 'replaceState';
+    history[method](null, "", "#/" + route);
+  }
+  document.body.dataset.route = route;
   $$(".nav-item").forEach(el => el.classList.toggle("active", el.dataset.route === route));
   const crumb = $("#crumb");
-  crumb.innerHTML = `<span class="crumb-home" onclick="navigate('dashboard')">首页</span>` +
-    (route !== "dashboard" ? `<span class="crumb-sep">/</span><span>${ROUTES[route].title}</span>` : "");
+  crumb.innerHTML = route === "qa" ? '<span>智能问答</span>' :
+    `<span class="crumb-home" onclick="navigate(homeRoute())">首页</span><span class="crumb-sep">/</span><span>${ROUTES[route].title}</span>`;
   const vp = $("#viewport");
   destroyDocFolder();     // 离开仪表盘前停掉漂浮物理
   destroyLatticeLoaders(); // 离开问答页前停掉秒表
+  vp.classList.toggle("qa-viewport", route === "qa");
   vp.innerHTML = "";
   vp.classList.remove("fade-in");
   void vp.offsetWidth;
@@ -1320,11 +1352,12 @@ function toggleTheme() {
   const html = document.documentElement;
   const next = html.getAttribute("data-theme") === "light" ? "dark" : "light";
   html.setAttribute("data-theme", next);
-  localStorage.setItem("ca-theme", next);
+  try { localStorage.setItem("ca-theme", next); } catch { }
   toast(next === "light" ? "已切换为浅色模式" : "已切换为深色模式", "info");
 }
 function initTheme() {
-  const t = localStorage.getItem("ca-theme");
+  let t;
+  try { t = localStorage.getItem("ca-theme"); } catch { }
   if (t) document.documentElement.setAttribute("data-theme", t);
 }
 
@@ -1402,6 +1435,7 @@ function panelState(ico, text, hint = "", isError = false) {
      GET /api/student/applications           学生：本人申请
    ============================================================ */
 const workbench = {
+  ownerId: null,
   loading: false,
   loadedAt: 0,
   health: null, healthError: "",
@@ -1413,8 +1447,18 @@ const workbench = {
 };
 
 const isAdmin = () => currentUser?.role === "admin";
+function resetWorkbenchOwner(id) {
+  if (workbench.ownerId === id) return;
+  Object.keys(workbench).forEach(key => {
+    workbench[key] = key.endsWith('Error') ? '' : key === 'loading' ? false : key === 'loadedAt' ? 0 : null;
+  });
+  workbench.ownerId = id;
+}
 
 async function loadWorkbench(force = false) {
+  const owner = currentUser?.id;
+  if (!owner) return false;
+  resetWorkbenchOwner(owner);
   if (workbench.loading) return false;
   if (!force && workbench.loadedAt && Date.now() - workbench.loadedAt < 15_000) return false;
   workbench.loading = true;
@@ -1433,6 +1477,7 @@ async function loadWorkbench(force = false) {
   }
 
   const settled = await Promise.allSettled(tasks.map(([, path]) => apiGet(path)));
+  if (owner !== currentUser?.id || workbench.ownerId !== owner) return false;
   settled.forEach((r, i) => {
     const key = tasks[i][0];
     if (r.status === "fulfilled") {
@@ -1755,160 +1800,130 @@ function quickCard(title, desc, ico, color, route, action) {
    视图：智能问答（对接 /api/rag/chat）
    ============================================================ */
 let chatMessages = [];
-
+let chatBusy = false, chatPending = false, chatLoading = false, chatGeneration = 0, chatPollTimer;
+let historyGeneration = 0, chatRequestGeneration = 0;
+function conversationKey() { return `campusagent:last-conversation:${currentUser?.id}`; }
+function rememberConversation(id) {
+  try { id ? localStorage.setItem(conversationKey(), String(id)) : localStorage.removeItem(conversationKey()); } catch { }
+}
+function rememberedConversation() { try { return Number(localStorage.getItem(conversationKey())) || null; } catch { return null; } }
+function chatUrl(id) { history.replaceState(null, "", id ? `#/qa?conversation=${id}` : '#/qa'); }
+function chatAvailable() { return !chatBusy && !chatPending && !chatLoading; }
+function syncChatState() {
+  const layout = $('.qa-layout');
+  const count = $('#chatBody')?.querySelectorAll('.msg').length || 0;
+  const content = count > 0 || !!$('#chatBody .chat-loading');
+  layout?.classList.toggle('is-empty', !content);
+  const empty = $('#qaEmpty'); if (empty) empty.hidden = content;
+  const actions = $('#qaActions'); if (actions) actions.hidden = !count;
+  const input = $('#qaInput'), send = $('#qaSend');
+  if (send) send.disabled = !chatAvailable() || !input?.value.trim();
+  if (input) input.disabled = chatLoading || chatPending;
+  $$('.qa-suggestion').forEach(button => button.disabled = !chatAvailable());
+  $('#chatStatus') && ($('#chatStatus').textContent = chatLoading ? '正在载入对话…' : chatBusy || chatPending ? '正在生成回答…' : '');
+}
+function scrollChatToReply(body, reply) {
+  if (reply?.querySelector('.service-guide')) {
+    body.scrollTop += reply.getBoundingClientRect().top - body.getBoundingClientRect().top - 24;
+  } else body.scrollTop = body.scrollHeight;
+}
 function renderQA(vp) {
   vp.innerHTML = `
-    <div class="page-head">
-      <div>
-        <div class="page-title">智能问答</div>
-        <div class="page-desc">基于现行政策的检索增强问答，每个事实性回答均附引用来源</div>
+    <div class="qa-layout is-empty"><div class="qa-chat">
+      <div class="qa-chat-head" id="qaActions" hidden><span class="session-state" id="sessionState">智能问答</span>
+        <div class="qa-head-actions"><button class="btn btn-sm btn-ghost" onclick="openShareDialog()">⎘ 分享对话</button><button class="btn btn-sm btn-ghost" onclick="newConversation()">＋ 新对话</button></div>
       </div>
-      <div style="display:flex;gap:8px">
-        <span class="tag tag-active"><span class="tag-dot"></span>仅检索现行版本</span>
-        <span class="tag tag-violet">RAG · 引用校验</span>
-      </div>
-    </div>
-
-    <div class="qa-layout">
-      <div class="qa-chat">
-        <div class="qa-chat-head">
-          <h3>可信问答会话</h3>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-            <span class="session-state" id="sessionState"></span>
-            <button class="btn btn-sm" onclick="openShareDialog()">⎘ 分享对话</button>
-            <button class="btn btn-sm" onclick="newConversation()">＋ 新会话</button>
-            <button class="btn btn-sm" onclick="clearChat()">清空当前</button>
-          </div>
-        </div>
-        <div class="qa-chat-body" id="chatBody">
-          <div class="msg bot">
-            <div class="msg-bubble">
-              你好，我是 CampusAgent 智能助手<br/>
-              我会先检索学校正式发布的政策再作答：事实性内容附带原文引用，属于办事事项的问题会直接给出条件、步骤与材料清单。<br/>
-              试试问我「国家奖学金的申请条件」或「学生证丢了怎么补办」。
-            </div>
-          </div>
-        </div>
-        <div class="qa-input-area">
-          <div class="qa-input-wrap">
-            <textarea class="qa-input" id="qaInput" rows="1" placeholder="输入你的问题，Enter 发送 / Shift+Enter 换行…"></textarea>
-            <button class="qa-send" id="qaSend" title="发送">➤</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="qa-side">
-        <div class="side-card">
-          <h4>我的会话 <span class="side-note">GET /api/chat/conversations</span></h4>
-          <div id="convList" class="conv-list"><div class="form-hint">加载中…</div></div>
-        </div>
-        <div class="side-card">
-          <h4>试试这些问题</h4>
-          ${M.qaSuggests.map(s => `<button class="suggest-chip" onclick="askQuestion('${s}')">${s}</button>`).join("")}
-        </div>
-        <div class="side-card">
-          <h4>回答保障</h4>
-          <div style="font-size:12.5px;color:var(--text-2);line-height:1.9">
-            ✓ 仅依据现行政策生成<br/>
-            ✓ 每条事实标注引用<br/>
-            ✓ 证据不足时明确拒答<br/>
-            ✓ 事项问题返回结构化引导
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  const input = $("#qaInput");
-  const send = $("#qaSend");
-  input.addEventListener("input", () => {
-    input.style.height = "auto";
-    input.style.height = Math.min(input.scrollHeight, 100) + "px";
+      <div class="qa-empty" id="qaEmpty"><span class="qa-brand-symbol" aria-hidden="true">✦</span><h1>校园事务，从这里开始</h1><p>问政策、找材料、理清办理步骤。</p></div>
+      <div class="qa-chat-body" id="chatBody" aria-label="问答消息" aria-live="polite"></div>
+      <div class="qa-input-area"><div class="qa-input-wrap">
+        <textarea class="qa-input" id="qaInput" rows="1" aria-label="输入你的问题" maxlength="2000" placeholder="有什么校园事务想了解？"></textarea>
+        <button class="qa-send" id="qaSend" type="button" title="发送问题" aria-label="发送问题" disabled>↑</button>
+      </div><div class="qa-input-foot"><span>回答附来源 · 办理以学校最新通知为准</span><span id="chatStatus" role="status"></span></div></div>
+      <div class="qa-starters"><button class="qa-suggestion" data-question="国家奖学金的申请条件是什么？"><span>✦</span> 奖学金申请条件</button><button class="qa-suggestion" data-question="学生证丢了怎么补办？"><span>▤</span> 学生证补办流程</button><button class="qa-suggestion" data-question="宿舍怎么报修？"><span>⌂</span> 宿舍报修</button></div>
+    </div></div>`;
+  const input = $('#qaInput');
+  input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 160) + 'px'; syncChatState(); });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); $('#qaSend').click(); }
   });
-  input.addEventListener("keydown", e => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send.click();
-    }
-  });
-  send.addEventListener("click", () => {
-    const q = input.value.trim();
-    if (q) askQuestion(q);
-  });
-
-  chatMessages = [];
+  $('#qaSend').addEventListener('click', () => askQuestion(input.value));
+  $$('.qa-suggestion').forEach(button => button.addEventListener('click', () => askQuestion(button.dataset.question)));
   chatConversationId = null;
+  chatPending = false;
   exitShareSelect();
-  enhanceMessageActions();      // 欢迎语也带上操作条
-  updateSessionState();
+  syncChatState();
   loadConversationList();
+  queueMicrotask(() => {
+    const id = Number(parseHashRoute().params.get('conversation')) || rememberedConversation();
+    if (currentRoute === 'qa' && id && !chatLoading && !chatConversationId && !chatBusy) openConversation(id);
+  });
 }
 
-async function askQuestion(q) {
-  const body = $("#chatBody");
-  if (!body) return;
-  const input = $("#qaInput");
-  if (input) { input.value = ""; input.style.height = "auto"; }
-  const sendBtn = $("#qaSend");
-  if (sendBtn) sendBtn.disabled = true;
-
-  const userMsg = document.createElement("div");
-  userMsg.className = "msg user";
-  userMsg.dataset.time = new Date().toISOString();
-  userMsg.innerHTML = `<div class="msg-bubble">${escapeHtml(q)}</div>`;
+async function askQuestion(question) {
+  const q = String(question || '').trim();
+  if (!q || !chatAvailable()) return;
+  if (currentRoute !== 'qa') navigate('qa');
+  const body = $('#chatBody');
+  if (!body || q.length > 2000) return;
+  const generation = chatGeneration, userId = currentUser?.id, requestGeneration = ++chatRequestGeneration;
+  chatBusy = true;
+  const input = $('#qaInput');
+  if (input) { input.value = ''; input.style.height = 'auto'; }
+  const userMsg = document.createElement('div');
+  userMsg.className = 'msg user'; userMsg.dataset.time = new Date().toISOString();
+  userMsg.innerHTML = `<div class="msg-bubble">${escapeHtml(q).replace(/\n/g, '<br/>')}</div>`;
   body.appendChild(userMsg);
-
-  const loading = document.createElement("div");
-  loading.className = "msg bot";
+  const loading = document.createElement('div'); loading.className = 'msg bot';
   loading.innerHTML = `<div class="msg-bubble qa-thinking">${latticeLoaderHTML()}</div>`;
-  body.appendChild(loading);
-  body.scrollTop = body.scrollHeight;
-  const thinking = mountLatticeLoader($(".lattice-loader", loading));
-
+  body.appendChild(loading); syncChatState(); body.scrollTop = body.scrollHeight;
+  const thinking = mountLatticeLoader($('.lattice-loader', loading));
+  const live = () => userId === currentUser?.id && generation === chatGeneration && body.isConnected;
   try {
-    const payload = {
-      query: q,
-      knowledgeBaseId: "campus-default",
-      requestId: (crypto?.randomUUID?.() || String(Date.now() + Math.random()))
-    };
-    if (chatConversationId) payload.conversationId = chatConversationId;
-
-    const turn = await apiPost("/api/rag/chat", payload);
-    if (turn?.conversationId) chatConversationId = turn.conversationId;
-    // 后端消息 id 用于“只分享选中的消息”的链接，缺失时按整段会话分享
+    // Create on the first real question: failures still have a recoverable conversation ID.
+    if (!chatConversationId) {
+      const conversation = await apiPost('/api/chat/conversations');
+      if (!live()) return;
+      chatConversationId = conversation.id;
+      rememberConversation(conversation.id); chatUrl(conversation.id);
+    }
+    const id = chatConversationId;
+    const requestId = crypto.randomUUID ? crypto.randomUUID() : '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, c => (Number(c) ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> Number(c) / 4).toString(16));
+    const turn = await apiPost('/api/rag/chat', { query: q, knowledgeBaseId: 'campus-default', conversationId: id, requestId });
+    if (!live()) return;
     if (turn?.userMessageId) userMsg.dataset.msgId = String(turn.userMessageId);
-    updateSessionState();
-    loadConversationList();
-
-    await settleLatticeLoader(thinking, "done");   // 先显示“Done in x.xs”再换成答案
+    updateSessionState(); loadConversationList();
+    await settleLatticeLoader(thinking, 'done');
+    if (!live()) return;
     loading.remove();
-    const botMsg = document.createElement("div");
-    botMsg.className = "msg bot";
-    botMsg.dataset.time = new Date().toISOString();
-    if (turn?.assistantMessageId) botMsg.dataset.msgId = String(turn.assistantMessageId);
-    botMsg.innerHTML = renderChatTurn(turn);
-    botMsg.dataset.sources = JSON.stringify(turn?.sources || []);
-    botMsg.querySelectorAll(".cite-chip").forEach(chip => {
-      chip.addEventListener("click", () => showSourceCite(Number(chip.dataset.citeIndex), botMsg));
-    });
-    body.appendChild(botMsg);
-    enhanceMessageActions();
-    body.scrollTop = body.scrollHeight;
+    const bot = document.createElement('div'); bot.className = 'msg bot'; bot.dataset.time = new Date().toISOString();
+    if (turn?.assistantMessageId) bot.dataset.msgId = String(turn.assistantMessageId);
+    bot.innerHTML = renderChatTurn(turn); bot.dataset.sources = JSON.stringify(turn?.sources || []);
+    body.appendChild(bot); bindChatContent(bot); enhanceMessageActions(); scrollChatToReply(body, bot);
   } catch (e) {
-    await settleLatticeLoader(thinking, "error");
+    if (!live()) return;
+    await settleLatticeLoader(thinking, 'error');
+    if (!live()) return;
     loading.remove();
-    const botMsg = document.createElement("div");
-    botMsg.className = "msg bot";
-    botMsg.dataset.time = new Date().toISOString();
-    botMsg.innerHTML = errorBlock(e.message, e.hint);
-    body.appendChild(botMsg);
-    enhanceMessageActions();
-    body.scrollTop = body.scrollHeight;
+    const bot = document.createElement('div'); bot.className = 'msg bot chat-error';
+    bot.innerHTML = errorBlock(e.message, e.hint); body.appendChild(bot);
+    if (input) input.value = q;
+    loadConversationList(); body.scrollTop = body.scrollHeight;
   } finally {
-    if (sendBtn) sendBtn.disabled = false;
+    thinking?.destroy?.();
+    if (requestGeneration !== chatRequestGeneration) return;
+    chatBusy = false;
+    if (live()) syncChatState();
+    else if (currentRoute === 'qa' && currentUser?.id === userId) {
+      const id = chatConversationId || rememberedConversation();
+      id ? openConversation(id) : syncChatState();
+    }
   }
 }
 window.askQuestion = askQuestion;
+function bindChatContent(root) {
+  root.querySelectorAll('.cite-chip').forEach(chip => chip.addEventListener('click', () => showSourceCite(Number(chip.dataset.citeIndex), chip.closest('.msg'))));
+  window.CampusGuide.mount(root);
+}
 
 /* ============================================================
    回答渲染：对应后端 ChatResponse
@@ -1921,11 +1936,11 @@ window.askQuestion = askQuestion;
 function citeChipsHtml(sources) {
   if (!sources || !sources.length) return "";
   return `<div class="msg-cite">${sources.map((s, i) =>
-    `<span class="cite-chip" data-cite-index="${i}">[${i + 1}] ${escapeHtml(s.fileName || s.documentId || '来源')}${s.pageNumber != null ? " · p." + s.pageNumber : ""} · chunk #${s.chunkIndex ?? "-"}</span>`
+    `<span class="cite-chip" data-cite-index="${i}">[${i + 1}] ${escapeHtml(s.fileName || s.documentId || '来源')}${s.pageNumber != null ? " · p." + s.pageNumber : ""}</span>`
   ).join("")}</div>`;
 }
 
-function renderChatTurn(turn) {
+function renderChatTurn(turn, { readOnly = false } = {}) {
   if (!turn) return `<div class="msg-bubble">（后端未返回内容）</div>`;
   const answer = escapeHtml(turn.answer || "（未返回答案）").replace(/\n/g, "<br/>");
   const sources = turn.sources || [];
@@ -1936,46 +1951,15 @@ function renderChatTurn(turn) {
         ? `<span class="tag tag-active" style="font-size:10px">AI 叙述</span>`
         : `<span class="tag tag-draft" style="font-size:10px">数据库引导</span>`)
     : "";
-  const meta = `<div class="msg-extra">
-      <span class="tag tag-info" style="font-size:10px">${escapeHtml(turn.type || "QA")}</span>
-      ${turn.queryIntent ? `<span class="tag tag-violet" style="font-size:10px">${escapeHtml(turn.queryIntent)}</span>` : ""}
-      ${modeTag}
-      <span class="meta-text">检索候选 ${turn.retrievalCount ?? 0} · 重排 ${turn.rerankCount ?? 0} · 采用 ${turn.usedContextCount ?? 0}</span>
-    </div>`;
+  const hasDebug = turn.retrievalCount != null || turn.rewrittenQuery;
+  const meta = !readOnly && hasDebug ? `<details class="msg-debug"><summary>本轮检索信息</summary><div class="msg-extra"><span>检索候选 ${turn.retrievalCount ?? 0} · 重排 ${turn.rerankCount ?? 0} · 采用 ${turn.usedContextCount ?? 0}</span>${modeTag}${turn.rewrittenQuery ? `<p>检索问题：${escapeHtml(turn.rewrittenQuery)}</p>` : ''}</div></details>` : '';
 
   // 事项引导分支：后端返回结构化事项 + 步骤 + 来源
-  if (turn.service) {
-    const s = turn.service;
-    const steps = turn.steps || [];
-    const materials = s.materials || [];
-    return `
-      <div class="msg-bubble">${answer}</div>
-      <div class="msg-service">
-        <div class="msvc-head">
-          <b>${escapeHtml(s.name || "办理事项")}</b>
-          <span class="brief-meta">${escapeHtml(s.department || "-")}${s.deadline ? " · 截止 " + escapeHtml(s.deadline) : ""}</span>
-        </div>
-        ${(s.requirements || []).length ? `<div class="brief-block"><b>办理条件</b><ul>${s.requirements.map(r => `<li>${escapeHtml(r)}</li>`).join("")}</ul></div>` : ""}
-        ${steps.length ? `<div class="brief-block"><b>办理步骤（${steps.length}）</b>
-          <ol class="msvc-steps">${steps.map((st, i) => `<li${turn.currentStep === (st.order || i + 1) ? ' class="on"' : ""}>
-            <b>${escapeHtml(st.title)}</b>${st.responsibleDepartment ? ` · ${escapeHtml(st.responsibleDepartment)}` : ""}${st.estimatedTime ? ` · ${escapeHtml(st.estimatedTime)}` : ""}
-            ${st.description ? `<div class="li-meta">${escapeHtml(st.description)}</div>` : ""}
-          </li>`).join("")}</ol></div>` : ""}
-        ${materials.length ? `<div class="brief-block"><b>材料清单（${materials.length}）</b><ul>${materials.map(m => `<li>${m.required ? '<span class="req">必交</span>' : '<span class="opt">选交</span>'} ${escapeHtml(m.name)}${m.description ? ` · ${escapeHtml(m.description)}` : ""}</li>`).join("")}</ul></div>` : ""}
-        ${s.location || s.officeHours || s.contact ? `<div class="brief-block"><b>办理信息</b>
-          <div class="li-meta">${[s.location, s.officeHours, s.contact].filter(Boolean).map(escapeHtml).join(" · ")}</div></div>` : ""}
-        <div class="msvc-actions">
-          ${!isAdmin() ? `<button class="btn btn-sm btn-primary" onclick="openNewApplication(${s.id})">提交办理申请</button>` : ""}
-          <button class="btn btn-sm" onclick="showAffair(${s.id})">查看事项详情</button>
-          ${s.sourceDocumentId ? `<a class="btn btn-sm" href="${API_BASE}/api/services/${s.id}/source" target="_blank" rel="noopener">下载来源文件</a>` : ""}
-          ${turn.source?.url ? `<a class="btn btn-sm" href="${escAttr(turn.source.url)}" target="_blank" rel="noopener">查看政策原文</a>` : ""}
-        </div>
-      </div>
-      ${citeChipsHtml(sources)}
-      ${meta}`;
+  if (turn.type === "SERVICE_GUIDE" && turn.service) {
+    return `<div class="msg-bubble">${answer}</div>${window.CampusGuide.html(turn, { readOnly })}${citeChipsHtml(sources)}${meta}`;
   }
 
-  const related = turn.relatedService
+  const related = !readOnly && turn.relatedService
     ? `<div class="msg-related">识别到相关事项：<b>${escapeHtml(turn.relatedService.name || turn.relatedService.code)}</b>
          <span class="link-btn" onclick="recognizeToAffair()">去办事引导查看 ›</span></div>`
     : "";
@@ -1992,58 +1976,50 @@ window.recognizeToAffair = recognizeToAffair;
          DELETE /api/chat/conversations/{id}
    本页采用“首次提问时由 /api/rag/chat 懒创建”的方式，避免堆积空会话。 */
 function updateSessionState() {
-  const el = $("#sessionState");
-  if (el) el.textContent = chatConversationId ? `当前会话 #${chatConversationId}` : "新会话（首次提问后创建）";
+  const selected = $('#convList .conv-item.on .conv-title');
+  const el = $('#sessionState');
+  if (el) el.textContent = selected?.textContent || '智能问答';
 }
-
 async function loadConversationList() {
-  const holder = $("#convList");
-  if (!holder) return;
+  const holder = $('#convList'), owner = currentUser?.id, generation = ++historyGeneration;
+  if (!holder || !owner) return;
   try {
-    const convs = await apiGet("/api/chat/conversations");
-    holder.innerHTML = convs.length ? convs.map(c => `
-      <div class="conv-item ${chatConversationId === c.id ? "on" : ""}">
-        <div class="conv-main" onclick="openConversation(${c.id})">
-          <div class="conv-title">${escapeHtml(c.title || "未命名对话")}</div>
-          <div class="conv-time">${relTime(c.updatedAt || c.createdAt)}</div>
-        </div>
-        <button class="conv-del" title="删除该会话" onclick="deleteConversation(${c.id}, event)">✕</button>
-      </div>`).join("") : `<div class="form-hint">还没有会话，直接提问就会自动创建。</div>`;
-  } catch (e) {
-    holder.innerHTML = `<div class="form-hint">会话列表加载失败：${escapeHtml(e.message || "")}</div>`;
-  }
+    const convs = await apiGet('/api/chat/conversations');
+    if (owner !== currentUser?.id || generation !== historyGeneration) return;
+    holder.innerHTML = convs.length ? convs.map(c => `<div class="conv-item ${chatConversationId === c.id ? 'on' : ''}">
+      <button class="conv-main" type="button" onclick="openConversation(${c.id})" title="${escAttr(c.title || '新对话')}"><span class="conv-title">${escapeHtml(c.title || '新对话')}</span><span class="conv-time">${relTime(c.updatedAt || c.createdAt)}</span></button>
+      <button class="conv-del" type="button" aria-label="删除会话：${escAttr(c.title || '新对话')}" title="删除对话" onclick="deleteConversation(${c.id}, event)">×</button></div>`).join('') : '<p class="history-empty">从一个问题开始，你的对话会保存在这里。</p>';
+    updateSessionState();
+  } catch (e) { if (owner === currentUser?.id && generation === historyGeneration) holder.innerHTML = `<p class="history-empty">${escapeHtml(e.message || '暂时无法加载历史')}</p><button class="link-btn" onclick="loadConversationList()">重试</button>`; }
 }
 window.loadConversationList = loadConversationList;
-
 async function deleteConversation(id, ev) {
   ev?.stopPropagation();
+  if (chatBusy && id === chatConversationId) { toast('请等待当前回答完成', 'warn'); return; }
+  if (!confirm('删除这段对话？消息和它的分享链接会一并失效。')) return;
   try {
     await apiDelete(`/api/chat/conversations/${id}`);
-    if (chatConversationId === id) { chatConversationId = null; clearChat(); }
-    toast("会话已删除", "success");
+    if (chatConversationId === id) clearChat();
+    else if (rememberedConversation() === id) rememberConversation(null);
     loadConversationList();
-  } catch (e) {
-    toast(e.message || "删除失败", "error");
-  }
+    toast('会话已删除', 'success');
+  } catch (e) { toast(e.message || '删除失败', 'error'); }
 }
 window.deleteConversation = deleteConversation;
-
 function newConversation() {
+  if (chatBusy) { toast('请等待当前回答完成后再新建对话', 'info'); return; }
+  if (currentRoute !== 'qa') navigate('qa');
   clearChat();
-  toast("已切换到新会话，首次提问后会在后端创建", "info");
+  if (window.innerWidth <= 768) closeDrawer();
+  $('#qaInput')?.focus();
 }
 window.newConversation = newConversation;
-
 function clearChat() {
-  const body = $("#chatBody");
-  if (!body) return;
-  body.innerHTML = `<div class="msg bot"><div class="msg-bubble">已切换到新会话。你可以直接提问，后端会在首次提问时创建会话并保存历史。</div></div>`;
-  chatMessages = [];
-  chatConversationId = null;
-  exitShareSelect();
-  enhanceMessageActions();
-  updateSessionState();
-  loadConversationList();
+  chatGeneration++; clearTimeout(chatPollTimer);
+  chatLoading = false; chatPending = false; chatConversationId = null;
+  rememberConversation(null); chatUrl(null);
+  $('#chatBody') && ($('#chatBody').innerHTML = '');
+  exitShareSelect(); syncChatState(); updateSessionState(); loadConversationList();
 }
 window.clearChat = clearChat;
 
@@ -2081,49 +2057,42 @@ window.showSourceCite = showSourceCite;
    role 取值为 USER / ASSISTANT；ASSISTANT 消息带 response.sources 引用快照。
    载入后把 chatConversationId 设为该会话，后续提问会接着这条会话继续。
    ============================================================ */
-async function openConversation(id) {
-  navigate("qa");
-  const body = $("#chatBody");
-  if (!body) return;
-  body.innerHTML = `<div class="msg bot"><div class="msg-bubble" style="opacity:.7">正在载入历史对话…</div></div>`;
+async function openConversation(id, { poll = false } = {}) {
+  if (!Number.isSafeInteger(Number(id)) || Number(id) <= 0) return;
+  if (chatBusy && !poll) { toast('请等待当前回答完成后再切换对话', 'info'); return; }
+  if (currentRoute !== 'qa') navigate('qa');
+  const body = $('#chatBody'); if (!body) return;
+  const generation = ++chatGeneration, owner = currentUser?.id;
+  clearTimeout(chatPollTimer); chatLoading = !poll; exitShareSelect();
+  if (!poll) body.innerHTML = '<div class="chat-loading" role="status">正在载入历史对话…</div>';
+  syncChatState();
   try {
     const data = await apiGet(`/api/chat/conversations/${id}/messages`);
-    const msgs = data?.messages || [];
-    chatConversationId = id;
-    if (!msgs.length) {
-      body.innerHTML = `<div class="msg bot"><div class="msg-bubble">该会话还没有消息。</div></div>`;
-      return;
-    }
-    body.innerHTML = "";
-    msgs.forEach(m => {
-      const isUser = String(m.role).toUpperCase() === "USER";
-      const el = document.createElement("div");
-      el.className = `msg ${isUser ? "user" : "bot"}`;
+    if (generation !== chatGeneration || owner !== currentUser?.id || !body.isConnected) return;
+    chatConversationId = Number(id); rememberConversation(id); chatUrl(id);
+    body.innerHTML = '';
+    for (const m of data?.messages || []) {
+      const user = String(m.role).toUpperCase() === 'USER';
+      const el = document.createElement('div'); el.className = `msg ${user ? 'user' : 'bot'}`;
       if (m.id != null) el.dataset.msgId = String(m.id);
       if (m.createdAt) el.dataset.time = m.createdAt;
-      if (isUser) {
-        el.innerHTML = `<div class="msg-bubble">${escapeHtml(m.content || "").replace(/\n/g, "<br/>")}</div>`;
-      } else {
-        // 历史里的 response 是后端保存的 ChatResponse 快照（去掉 answer 与调试字段，引用已截断）
-        el.innerHTML = renderChatTurn({ ...(m.response || {}), answer: m.content, sources: m.response?.sources || [] });
-        el.dataset.sources = JSON.stringify(m.response?.sources || []);
-        el.querySelectorAll(".cite-chip").forEach(chip => {
-          chip.addEventListener("click", () => showSourceCite(Number(chip.dataset.citeIndex), el));
-        });
-      }
-      body.appendChild(el);
-    });
-    if (data?.pending) {
-      body.insertAdjacentHTML("beforeend", `<div class="msg bot"><div class="msg-bubble" style="opacity:.7">该会话有一条回答正在生成中，可稍后刷新（后端 messages.pending=true）。</div></div>`);
+      el.innerHTML = user ? `<div class="msg-bubble">${escapeHtml(m.content || '').replace(/\n/g, '<br/>')}</div>` : renderChatTurn({ ...(m.response || {}), answer: m.content, sources: m.response?.sources || [] });
+      el.dataset.sources = JSON.stringify(m.response?.sources || []);
+      body.appendChild(el); bindChatContent(el);
     }
-    enhanceMessageActions();
-    body.scrollTop = body.scrollHeight;
-    updateSessionState();
-    loadConversationList();
-    toast("已载入历史对话，可继续提问", "info");
+    chatPending = !!data?.pending;
+    if (chatPending) {
+      body.insertAdjacentHTML('beforeend', '<div class="chat-loading" role="status">回答正在生成，完成后会自动同步…</div>');
+      chatPollTimer = setTimeout(() => { if (generation === chatGeneration && owner === currentUser?.id) openConversation(id, { poll: true }); }, 1800);
+    }
+    enhanceMessageActions(); scrollChatToReply(body, body.querySelector('.msg.bot:last-of-type')); updateSessionState(); loadConversationList();
+    if (window.innerWidth <= 768 && !poll) closeDrawer();
   } catch (e) {
-    body.innerHTML = `<div class="msg bot"><div class="msg-bubble" style="color:var(--danger)">${escapeHtml(e.message || "载入对话失败")}</div></div>`;
-  }
+    if (generation !== chatGeneration || owner !== currentUser?.id || !body.isConnected) return;
+    chatPending = false;
+    if (e.status === 404) { rememberConversation(null); chatConversationId = null; chatUrl(null); }
+    body.innerHTML = `<div class="chat-loading chat-error" role="alert">${escapeHtml(e.message || '载入对话失败')}<button class="link-btn" onclick="openConversation(${Number(id)})">重新加载</button></div>`;
+  } finally { if (generation === chatGeneration && owner === currentUser?.id && body.isConnected) { chatLoading = false; syncChatState(); } }
 }
 window.openConversation = openConversation;
 
@@ -2172,7 +2141,7 @@ function enhanceMessageActions(scope = document) {
     });
     acts.querySelector('[data-act="copy"]').addEventListener("click", async e => {
       e.stopPropagation();
-      const text = shareNodeText(el.querySelector(".msg-bubble"));
+      const text = messageShareText(el);
       const ok = await copyTextToClipboard(text);
       toast(ok ? "这条消息已复制" : "复制失败，请手动选择文本", ok ? "success" : "warn");
     });
@@ -2303,15 +2272,36 @@ function shareNodeText(el) {
   const raw = (el.innerText ?? el.textContent ?? "");
   return String(raw).replace(/\u00a0/g, " ").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 }
+function guideShareText(response) {
+  if (response?.type !== 'SERVICE_GUIDE' || !response.service) return '';
+  const s = response.service;
+  const steps = window.CampusServiceProgress.orderSteps(response.steps || []);
+  return [s.name, s.isExample ? '测试 / 示例数据，不代表学校真实政策。' : '',
+    ...(s.requirements?.length ? ['办理条件：' + s.requirements.join('；')] : []),
+    ...(steps.length ? ['办理步骤：', ...steps.map((step, index) => `${index + 1}. ${step.title}${step.description ? '：' + step.description : ''}`)] : []),
+    ...(s.materials?.length ? ['所需材料：' + s.materials.map(m => m.name + (m.required ? '（必需）' : '（可选）')).join('、')] : []),
+    s.department ? '办理部门：' + s.department : '',
+    response.source?.title || s.sourceTitle ? '依据：' + (response.source?.title || s.sourceTitle) : ''
+  ].filter(Boolean).join('\n');
+}
+function messageShareText(el) {
+  let text = shareNodeText(el.querySelector('.msg-bubble'));
+  const guide = el.querySelector('[data-guide]');
+  if (guide) {
+    try { const data = JSON.parse(guide.dataset.guide); text += '\n\n' + guideShareText({ ...data, type: 'SERVICE_GUIDE' }); } catch { }
+  }
+  return text;
+}
 
 /** 从当前问答区读出结构化记录：角色、正文、引用、回答类型、后端消息 id。
     onlySelected=true 时只取多选中的消息。 */
 function collectTranscript(onlySelected = false) {
   const out = [];
   $$(".qa-chat-body .msg").forEach(el => {
+    if (el.classList.contains("chat-error") || el.querySelector(".qa-thinking")) return;
     if (onlySelected && !el.classList?.contains("is-selected")) return;
     const isUser = el.classList?.contains("user");
-    const text = shareNodeText(el.querySelector(".msg-bubble"));
+    const text = messageShareText(el);
     if (!text) return;
     let cites = [];
     if (!isUser) {
@@ -2525,9 +2515,10 @@ function drawShareLayout(ctx, layout, theme) {
 }
 
 /** 生成对话长图；传入消息列表时只画这些消息（多选分享用）。 */
-async function conversationImage(list) {
+async function conversationImage(list = selectedTranscript()) {
   const full = collectTranscript();
-  const msgs = (list && list.length ? list : full).filter(m => m.text);
+  const msgs = (Array.isArray(list) ? list : full).filter(m => m.text)
+    .map(m => m.guideText ? { ...m, text: m.text + '\n\n' + m.guideText } : m);
   if (!msgs.length) { toast("当前会话还没有内容可分享", "warn"); return null; }
   const theme = shareTheme();
   const measure = document.createElement("canvas").getContext("2d");
@@ -2553,9 +2544,9 @@ function shareCanvasBlob(canvas) {
   });
 }
 
-async function copyConversationImage() {
+async function copyConversationImage(list = selectedTranscript()) {
   try {
-    const canvas = await conversationImage();
+    const canvas = await conversationImage(list);
     if (!canvas) return;
     if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
       toast("当前浏览器不支持复制图片，请改用「导出 PNG」", "warn");
@@ -2569,9 +2560,9 @@ async function copyConversationImage() {
   }
 }
 
-async function exportConversationImage() {
+async function exportConversationImage(list = selectedTranscript()) {
   try {
-    const canvas = await conversationImage();
+    const canvas = await conversationImage(list);
     if (!canvas) return;
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
     const a = document.createElement("a");
@@ -2632,7 +2623,8 @@ async function shareLinkFromSelection() {
   if (!msgs.length) { toast("请先选择要分享的消息", "warn"); return; }
   const ids = msgs.map(m => m.msgId).filter(v => v != null);
   const total = collectTranscript().length;
-  const partial = shareSelect.active && ids.length > 0 && ids.length !== total;
+  if (shareSelect.active && !ids.length) { toast("所选消息尚未保存，暂时不能生成链接；可以导出图片。", "warn"); return; }
+  const partial = shareSelect.active;
   let share;
   try {
     share = await createShareToken(partial ? ids : null);
@@ -2797,7 +2789,7 @@ window.exitShareSelect = exitShareSelect;
 function parseHashRoute() {
   const raw = location.hash.replace(/^#\/?/, "");
   const [route, qs] = raw.split("?");
-  return { route: route || "dashboard", params: new URLSearchParams(qs || "") };
+  return { route: route || "", params: new URLSearchParams(qs || "") };
 }
 
 /** 深链入口：#/qa?conversation=<id> → 打开问答页并载入该会话。 */
@@ -2830,6 +2822,7 @@ function sharedTranscript(payload) {
     return {
       role: isUser ? "user" : "bot",
       text: m.content || "",
+      guideText: !isUser ? guideShareText(m.response) : '',
       cites: isUser ? [] : sources.map(s => (s?.pageNumber != null
         ? `${s.fileName || s.documentId || "来源"} p.${s.pageNumber}`
         : String(s?.fileName || s?.documentId || "来源"))),
@@ -2845,9 +2838,13 @@ function hidePublicShare() {
   if (document.body.dataset.auth === "share") document.body.dataset.auth = currentUser ? "in" : "pending";
 }
 
-function exitPublicShare() {
+async function exitPublicShare() {
   hidePublicShare();
-  location.hash = "/dashboard";
+  history.replaceState(null, '', location.pathname);
+  try {
+    currentUser = mapUser(await apiGet('/api/auth/me'));
+    currentUser.mustChangePassword ? showChangePassword() : enterApp();
+  } catch { currentUser = null; showLogin(); }
 }
 
 function publicShareHTML(payload, msgs) {
@@ -2883,7 +2880,7 @@ function publicShareHTML(payload, msgs) {
           }
           const response = raw.response || {};
           return `<div class="msg bot" data-sources="${escAttr(JSON.stringify(response.sources || []))}">
-            ${renderChatTurn({ ...response, answer: m.text, sources: response.sources || [] })}
+            ${renderChatTurn({ ...response, answer: m.text, sources: response.sources || [] }, { readOnly: true })}
           </div>`;
         }).join("")}
       </div>
@@ -2912,6 +2909,7 @@ async function renderPublicShare(token) {
     const payload = await apiGet(`/api/share/chat/${encodeURIComponent(token)}`);
     const msgs = sharedTranscript(payload);
     shell.innerHTML = publicShareHTML(payload, msgs);
+    window.CampusGuide.mount(shell);
     $("#sharePageCopyImg")?.addEventListener("click", () => copyConversationImage(msgs));
     $("#sharePageExportImg")?.addEventListener("click", () => exportConversationImage(msgs));
     $$(".share-page-body .cite-chip").forEach(chip => {
@@ -4969,9 +4967,12 @@ window.addEventListener("hashchange", () => {
   if (isShareHash()) { renderPublicShare(shareTokenFromHash()); return; }
   if (!$("#shareScreen")?.hidden) hidePublicShare();
   const { route } = parseHashRoute();
-  const target = ROUTES[route] ? route : "dashboard";
-  if (target !== currentRoute) navigate(target);
-  else applyDeepLink();     // 同一路由但带上 conversation 参数（站内会话链接）
+  if (!currentUser || document.body.dataset.auth !== "in") return;
+  const target = ROUTES[route] ? route : homeRoute();
+  if (target !== currentRoute) navigate(target, { preserveHash: true });
+  const { params } = parseHashRoute();
+  const id = Number(params.get("conversation"));
+  if (target === "qa" && id && id !== chatConversationId && !chatLoading) openConversation(id);     // 同一路由但带上 conversation 参数（站内会话链接）
 });
 
 /* ============================================================

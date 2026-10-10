@@ -6,7 +6,7 @@ import { ref, computed } from 'vue'
 
 // Exercise the real composable with an API boundary and explicit mount/unmount hooks.
 const source = (await readFile(new URL('../src/modules/knowledge/history/useChatHistory.ts', import.meta.url), 'utf8'))
-  .replace(/^import .*\n/gm, '').replace('const inFlight = new Set<string>()', '').replace('export function useChatHistory', 'function useChatHistory')
+  .replace(/^import[^\r\n]*\r?\n/gm, '').replace('const inFlight = new Set<string>()', '').replace('export function useChatHistory', 'function useChatHistory')
 const { outputText } = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
 const factory = new Function('ref', 'computed', 'onMounted', 'onBeforeUnmount', 'currentUser', 'historyApi', 'chatWithKnowledge',
   'localStorage', 'inFlight', 'setTimeout', 'clearTimeout', outputText.replace(/export \{\};?/, '') + '\nreturn useChatHistory()')
