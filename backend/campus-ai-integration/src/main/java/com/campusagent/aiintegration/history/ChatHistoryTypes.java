@@ -10,7 +10,13 @@ import java.util.List;
 public final class ChatHistoryTypes {
     private ChatHistoryTypes() { }
     public record Conversation(long id, String title, LocalDateTime createdAt, LocalDateTime updatedAt) { }
-    public record Message(long id, String requestId, String role, String content, JsonNode response, LocalDateTime createdAt) { }
+    public record Message(long id, String requestId, String role, String content, JsonNode response, LocalDateTime createdAt,
+                          com.campusagent.aiintegration.feedback.FeedbackTypes.Feedback feedback) {
+        public Message(long id, String requestId, String role, String content, JsonNode response, LocalDateTime createdAt) {
+            this(id, requestId, role, content, response, createdAt, null);
+        }
+    }
+    public record RegenerateRequest(String requestId) { }
     public record Messages(List<Message> messages, boolean pending) { }
     // history is accepted for compatibility; authenticated persistent conversations use database history only.
     public record Request(String query, String knowledgeBaseId, List<ConversationMessage> history,

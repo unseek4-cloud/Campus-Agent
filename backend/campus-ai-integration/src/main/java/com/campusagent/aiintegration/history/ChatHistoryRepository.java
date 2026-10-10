@@ -57,6 +57,17 @@ public class ChatHistoryRepository {
         return jdbc.query("SELECT m.* FROM ai_message m JOIN ai_conversation c ON c.id=m.conversation_id WHERE c.user_id=? AND c.id=? ORDER BY m.created_at ASC,m.id ASC",
                 messageMapper, userId, id);
     }
+    public long ownedMessageConversation(long userId, long messageId) {
+        return jdbc.queryForList("SELECT c.id FROM ai_conversation c JOIN ai_message m ON m.conversation_id=c.id WHERE c.user_id=? AND m.id=? AND m.role='ASSISTANT'",
+                Long.class, userId, messageId).stream().findFirst().orElseThrow(() -> new BusinessException("CHAT_NOT_FOUND", "回复不存在", HttpStatus.NOT_FOUND));
+    }
+    public List<Message> messagesWithFeedback(long userId, long id) {
+        var feedback = new HashMap<Long, com.campusagent.aiintegration.feedback.FeedbackTypes.Feedback>();
+        jdbc.query("SELECT f.message_id,f.rating,f.updated_at FROM ai_reply_feedback f JOIN ai_message m ON m.id=f.message_id "
+                + "JOIN ai_conversation c ON c.id=m.conversation_id WHERE f.user_id=? AND c.user_id=? AND c.id=?",
+                (org.springframework.jdbc.core.RowCallbackHandler) r -> feedback.put(r.getLong(1), new com.campusagent.aiintegration.feedback.FeedbackTypes.Feedback(r.getString(2), r.getTimestamp(3).toLocalDateTime())), userId, userId, id);
+        return messages(userId, id).stream().map(m -> new Message(m.id(),m.requestId(),m.role(),m.content(),m.response(),m.createdAt(),feedback.get(m.id()))).toList();
+    }
     public long message(long id, String requestId, String role, String content, String metadata) {
         return insert("INSERT INTO ai_message(conversation_id,request_id,role,content,sources_json) VALUES (?,?,?,?,?)", id, requestId, role, content, metadata);
     }

@@ -9,6 +9,8 @@ import { searchKnowledge } from '../api'
 import ChatHistory from '../history/ChatHistory.vue'
 import { useChatHistory } from '../history/useChatHistory'
 import type { ApiResponse, KnowledgeSearchResult } from '../types'
+import ReplyActions from '../feedback/ReplyActions.vue'
+import { historyApi } from '../history/api'
 
 
 const query = ref('')
@@ -20,6 +22,33 @@ const loading = computed(() => searching.value || busy.value || pending.value)
 const searched = ref(false)
 const results = ref<KnowledgeSearchResult[]>([])
 const topKOptions = [1, 3, 5, 10, 20]
+const shareLink = ref(''), shareToken = ref(''), shareConversationId = ref<number | null>(null), shareOpen = ref(false), sharing = ref(false)
+async function shareReply(id: number) {
+  if (!activeId.value || sharing.value) return
+  sharing.value = true
+  const conversationId = activeId.value, index = messages.value.findIndex(m => m.id === id)
+  const previous = messages.value[index-1]
+  try {
+    const result = await historyApi.share(conversationId, previous?.role === 'user' ? [previous.id, id] : [id])
+    shareConversationId.value = conversationId; shareToken.value = result.token
+    shareLink.value = `${location.origin}${import.meta.env.BASE_URL}share/${encodeURIComponent(result.token)}`; shareOpen.value = true
+  } catch(e) { ElMessage.error(errorMessage(e)) }
+  finally { sharing.value = false }
+}
+async function copyShare() { try { await navigator.clipboard.writeText(shareLink.value); ElMessage.success('分享链接已复制') } catch { ElMessage.warning('请手动复制链接') } }
+async function revokeShare() {
+  if (!shareConversationId.value) return
+  try { await historyApi.revoke(shareConversationId.value, shareToken.value); shareOpen.value = false; ElMessage.success('分享链接已撤销') }
+  catch(e) { ElMessage.error(errorMessage(e)) }
+}
+async function regenerate(id: number) { try { await chat.regenerate(id); ElMessage.success('新回复已生成，原回答已保留') } catch(e) { ElMessage.error(errorMessage(e)) } }
+function editQuestion(id: number) { const index = messages.value.findIndex(m => m.id === id); const previous = messages.value[index-1]; if (previous?.role === 'user') query.value = previous.content }
+function showSources(id: number) {
+  const article = document.querySelector(`[data-message-id="${id}"]`)
+  const details = article?.querySelectorAll<HTMLDetailsElement>('.message-sources details')
+  if (!details?.length) return ElMessage.info('这条回复没有知识库引用')
+  details.forEach(d => { d.open = true }); article?.querySelector('.message-sources')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
 const canSearch = computed(() => query.value.trim().length > 0 && !loading.value && ready.value && !historyError.value)
 
 function scoreText(score: number | null): string {
@@ -114,6 +143,7 @@ async function selectConversation(id: number): Promise<void> {
         <article
           v-for="message in messages"
           :key="message.id"
+          :data-message-id="message.id"
           class="chat-message"
           :class="message.role === 'user' ? 'user-message' : 'assistant-message'"
         >
@@ -150,6 +180,7 @@ async function selectConversation(id: number): Promise<void> {
             <p>检索问题：{{ message.response.rewrittenQuery }}</p>
             <p>召回 {{ message.response.retrievalCount }} · 重排 {{ message.response.rerankCount }} · 使用 {{ message.response.usedContextCount }} 个片段</p>
           </details>
+          <ReplyActions v-if="message.role === 'assistant' && message.id > 0" :message-id="message.id" :content="message.content" :feedback="message.feedback" :disabled="loading" @feedback="message.feedback = $event" @share="shareReply(message.id)" @regenerate="regenerate(message.id)" @sources="showSources(message.id)" @edit="editQuestion(message.id)" />
         </article>
         <div v-if="busy || pending" class="pending-answer">
           CampusAgent 正在查找知识库…
@@ -256,6 +287,7 @@ async function selectConversation(id: number): Promise<void> {
       </div>
       </div>
     </section>
+    <el-dialog v-model="shareOpen" title="分享这轮问答" width="min(520px, 92vw)"><p style="font-size:14px">持有链接的人可免登录查看这轮问题、回答及引用。链接30天有效，可随时撤销。</p><el-input :model-value="shareLink" readonly aria-label="公开分享链接" /><template #footer><el-button @click="revokeShare">撤销链接</el-button><el-button type="primary" @click="copyShare">复制链接</el-button></template></el-dialog>
   </main>
 </template>
 
