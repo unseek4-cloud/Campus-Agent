@@ -928,6 +928,7 @@ const ROUTES = {
   "services-mgr": { title: "事项管理", render: renderServiceManager, role: "admin" },
   review: { title: "申请审核", render: renderApplicationReview, role: "admin" },
   audit: { title: "审计追溯", render: renderAudit, role: "admin" },
+  "ai-quality": { title: "AI 问答质量分析", render: renderAIQuality, role: "admin" },
   settings: { title: "系统设置", render: renderSettings, role: "admin" }
 };
 
@@ -2078,6 +2079,7 @@ async function openConversation(id, { poll = false } = {}) {
       if (m.createdAt) el.dataset.time = m.createdAt;
       el.innerHTML = user ? `<div class="msg-bubble">${escapeHtml(m.content || '').replace(/\n/g, '<br/>')}</div>` : renderChatTurn({ ...(m.response || {}), answer: m.content, sources: m.response?.sources || [] });
       el.dataset.sources = JSON.stringify(m.response?.sources || []);
+      el.dataset.rating = m.feedback?.rating || '';
       body.appendChild(el); bindChatContent(el);
     }
     chatPending = !!data?.pending;
@@ -2130,11 +2132,12 @@ function enhanceMessageActions(scope = document) {
     if (el.querySelector(":scope > .msg-acts")) return;
     const acts = document.createElement("div");
     acts.className = "msg-acts";
-    acts.innerHTML = `
+    acts.innerHTML = el.classList.contains('bot') && !el.classList.contains('chat-error') && el.dataset.msgId ? window.CampusFeedback.toolbar(el) : `
       <button type="button" class="msg-act" data-act="share" title="选择消息并分享">⎘ 分享</button>
       <button type="button" class="msg-act" data-act="copy" title="复制这条消息">▤ 复制</button>
       <span class="msg-time">${escapeHtml(fmtMsgTime(el.dataset.time))}</span>`;
     el.appendChild(acts);
+    window.CampusFeedback.bind(el, acts);
     acts.querySelector('[data-act="share"]').addEventListener("click", e => {
       e.stopPropagation();
       enterShareSelect(el);
@@ -2150,6 +2153,27 @@ function enhanceMessageActions(scope = document) {
     });
   });
   syncMsgSelection();
+}
+
+async function regenerateReply(el) {
+  if (!chatAvailable()) return toast('请等待当前回答完成','info');
+  const id = Number(el.dataset.msgId), conversationId = chatConversationId, owner = currentUser?.id;
+  if (!id || !conversationId) return toast('回复尚未保存，请刷新后重试','warn');
+  chatBusy = true; syncChatState();
+  const button = el.querySelector('[data-act="regenerate"]'); button.disabled = true;
+  const generation = ++chatRequestGeneration;
+  try {
+    await apiPost(`/api/chat/messages/${id}/regenerate`, { requestId: crypto.randomUUID() });
+    if (owner === currentUser?.id) toast('已生成新回复，原回答已保留','success');
+  } catch (e) { if (owner === currentUser?.id) toast(e.message || '重新生成失败','error'); }
+  finally {
+    button.disabled = false;
+    if (generation === chatRequestGeneration) {
+      chatBusy = false;
+      if (owner === currentUser?.id && currentRoute === 'qa' && conversationId === chatConversationId) await openConversation(conversationId);
+      syncChatState();
+    }
+  }
 }
 
 function enterShareSelect(el) {
@@ -2190,7 +2214,11 @@ function syncMsgSelection() {
     el.classList.toggle("is-pickable", shareSelect.active);
     el.classList.toggle("is-selected", selected);
     const btn = el.querySelector('.msg-act[data-act="share"]');
-    if (btn) btn.textContent = selected ? "✓ 已选" : "⎘ 分享";
+    if (btn?.classList.contains('reply-icon')) {
+      btn.innerHTML = window.CampusFeedback.icon('share');
+      btn.setAttribute('aria-pressed', String(selected));
+      btn.title = btn.ariaLabel = selected ? '已选择这条消息，点击取消' : '选择消息并分享';
+    } else if (btn) btn.textContent = selected ? "✓ 已选" : "⎘ 分享";
   });
   renderShareBar();
 }

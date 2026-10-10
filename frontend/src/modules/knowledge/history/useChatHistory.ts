@@ -3,8 +3,9 @@ import { currentUser } from '../../auth/state'
 import { chatWithKnowledge } from '../api'
 import type { ConversationMessage, RagChatResponse } from '../types'
 import { historyApi, type Conversation } from './api'
+import type { Feedback } from '../feedback/api'
 
-export interface DisplayMessage extends ConversationMessage { id: number; response?: RagChatResponse; restored?: boolean }
+export interface DisplayMessage extends ConversationMessage { id: number; response?: RagChatResponse; restored?: boolean; feedback?: Feedback | null }
 // Transient request markers bridge route changes before the server has committed USER.
 // They contain no message text; persistence and eventual results always come from MySQL.
 const inFlight = new Set<string>()
@@ -32,7 +33,7 @@ export function useChatHistory() {
     const data = await historyApi.messages(id)
     if (!valid() || activeId.value !== id) return
     messages.value = data.messages.map(m => ({ id: m.id, role: m.role === 'USER' ? 'user' : 'assistant', content: m.content,
-      response: m.response ? { ...m.response, answer: m.content } : undefined, restored: true }))
+      response: m.response ? { ...m.response, answer: m.content } : undefined, restored: true, feedback: m.feedback }))
     pending.value = data.pending || inFlight.has(`${ownerId}:${id}`)
     schedule(id)
   }
@@ -119,6 +120,23 @@ export function useChatHistory() {
     } finally { if (sendingKey) inFlight.delete(sendingKey); if (valid()) busy.value = false }
   }
   onMounted(restore)
+  async function regenerate(messageId: number) {
+    if (disabled.value || !valid() || activeId.value === null) return
+    const id = activeId.value, sendingKey = `${ownerId}:${id}`
+    busy.value = true; inFlight.add(sendingKey)
+    try {
+      const response = await historyApi.regenerate(messageId)
+      inFlight.delete(sendingKey)
+      if (!valid()) return
+      await load(id); await refreshList()
+      const answer = messages.value.find(m => m.id === response.assistantMessageId)
+      if (answer) { answer.response = response; answer.restored = false }
+    } catch (cause) {
+      inFlight.delete(sendingKey)
+      if (valid()) { try { await load(id); await refreshList() } catch { error.value = '同步失败，请重新加载' } }
+      throw cause
+    } finally { inFlight.delete(sendingKey); if (valid()) busy.value = false }
+  }
   onBeforeUnmount(() => { alive = false; clearTimeout(timer) })
-  return { conversations, messages, activeId, busy, pending, ready, disabled, error, restore, select, create, remove, send }
+  return { conversations, messages, activeId, busy, pending, ready, disabled, error, restore, select, create, remove, send, regenerate }
 }

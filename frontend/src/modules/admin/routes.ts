@@ -5,6 +5,7 @@ export const adminRoutes: RouteRecordRaw[] = [{
   meta: { role: 'ADMIN' },
   component: () => import('./AdminLayout.vue'),
   children: [
+    { path: 'ai-quality', name: 'admin-ai-quality', component: () => import('./pages/AIQualityPage.vue') },
     { path: 'applications', name: 'admin-applications', component: () => import('../applications/pages/ApplicationListPage.vue'), props: { admin: true } },
     { path: 'applications/:id', name: 'admin-application', component: () => import('../applications/pages/ApplicationDetailPage.vue'), props: { admin: true } },
     { path: 'services', name: 'admin-services', component: () => import('../serviceguide/pages/ServiceManagementPage.vue') },

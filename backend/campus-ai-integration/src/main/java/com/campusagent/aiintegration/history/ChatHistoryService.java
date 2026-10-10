@@ -27,7 +27,7 @@ public class ChatHistoryService {
     public Messages messages(long userId, long id) {
         return transaction.execute(s -> {
             repository.owned(userId, id, true);
-            return new Messages(repository.messages(userId, id), active(repository.lease(id)));
+            return new Messages(repository.messagesWithFeedback(userId, id), active(repository.lease(id)));
         });
     }
     public void delete(long userId, long id) {
@@ -41,6 +41,18 @@ public class ChatHistoryService {
     private record Prepared(long id, long userMessageId, List<ConversationMessage> history, Turn cached) { }
 
     public Turn chat(long userId, Request request) {
+        return chat(userId, request, null);
+    }
+    public Turn regenerate(long userId, long messageId, String requestId) {
+        long conversationId = repository.ownedMessageConversation(userId, messageId);
+        var messages = repository.messages(userId, conversationId);
+        var answer = messages.stream().filter(m -> m.id() == messageId).findFirst().orElseThrow(() -> conflict("回复已发生变化，请刷新"));
+        var question = messages.stream().filter(m -> m.role().equals("USER") && m.requestId().equals(answer.requestId())).findFirst().orElseThrow(() -> conflict("原问题不存在"));
+        // Append a new turn, retaining the original answer/feedback and only its preceding context.
+        String knowledgeBase = answer.response() == null ? null : answer.response().path("knowledgeBaseId").asText(null);
+        return chat(userId, new Request(question.content(), knowledgeBase, null, conversationId, requestId), question.id());
+    }
+    private Turn chat(long userId, Request request, Long contextBeforeId) {
         var normalized = RagService.normalize(new RagChatRequest(request.query(), request.knowledgeBaseId()));
         String requestId = request.requestId() == null ? UUID.randomUUID().toString() : request.requestId();
         if (!requestId.matches("[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}")) throw new IllegalArgumentException("requestId 必须为 UUID");
@@ -55,7 +67,7 @@ public class ChatHistoryService {
             if (active(repository.lease(id))) throw conflict("当前对话正在生成回答，请稍后刷新");
             // Retry a failed turn only while it is still the last turn, keeping chronology stable.
             if (user != null && existing.getLast().id() != user.id()) throw conflict("该问题之后已有新消息，请重新发送问题");
-            var history = existing.stream().filter(m -> !m.requestId().equals(requestId)).toList();
+            var history = existing.stream().filter(m -> !m.requestId().equals(requestId) && (contextBeforeId == null || m.id() < contextBeforeId)).toList();
             var context = history.subList(Math.max(0, history.size()-8), history.size()).stream()
                     .map(m -> new ConversationMessage(m.role().toLowerCase(Locale.ROOT), truncate(m.content(), 4000))).toList();
             long userMessageId = user == null ? repository.message(id, requestId, "USER", normalized.query(), null) : user.id();
@@ -66,7 +78,9 @@ public class ChatHistoryService {
         try {
             // The USER commit precedes network IO. No database lock is held while calling the AI.
             var response = ai.chat(new RagChatRequest(normalized.query(), normalized.knowledgeBaseId(), prepared.history()));
-            String metadata = metadata(response).toString();
+            var storedMetadata = metadata(response);
+            if (normalized.knowledgeBaseId() != null) storedMetadata.put("knowledgeBaseId", normalized.knowledgeBaseId());
+            String metadata = storedMetadata.toString();
             return transaction.execute(s -> {
                 repository.owned(userId, prepared.id(), true);
                 if (!requestId.equals(repository.lease(prepared.id()).requestId())) throw conflict("请求已失效，请刷新对话");
@@ -91,7 +105,7 @@ public class ChatHistoryService {
         return node;
     }
     private ChatResponse restore(Message message) {
-        ObjectNode node = message.response().deepCopy(); node.put("answer", message.content());
+        ObjectNode node = message.response().deepCopy(); node.remove("knowledgeBaseId"); node.put("answer", message.content());
         return json.convertValue(node, ChatResponse.class);
     }
     private static String truncate(String text, int length) {
