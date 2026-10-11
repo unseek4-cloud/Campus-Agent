@@ -50,7 +50,8 @@
 }
 
 [data-theme="light"] {
-  --bg-0: #f2f4f9;
+  /* 页面底色用纯白：学生问答与管理端共用同一组背景变量 */
+  --bg-0: #ffffff;
   --bg-1: #fbfcfe;
   --bg-2: #f5f7fb;
   --bg-3: #eceff6;
@@ -95,6 +96,10 @@ body::before {
   pointer-events: none;
   z-index: 0;
 }
+
+/* 浅色模式：整页白底，去掉这层淡彩光晕（否则白底上仍会泛出蓝紫色）。
+   深色模式保留原有光晕。 */
+[data-theme="light"] body::before { display: none; }
 
 /* 应用外壳：仅在鉴权通过后显示，避免未登录时侧边栏抢先闪现 */
 #app {
@@ -557,8 +562,9 @@ body[data-auth="in"] #app { display: flex; }
   line-height: 1.7;
 }
 .msg.user .msg-bubble {
-  background: linear-gradient(135deg, var(--primary), var(--primary-2));
-  color: #fff;
+  /* 学生提问气泡：淡蓝底 + 黑色字体（原来是主色渐变 + 白字） */
+  background: #D0E7F5;
+  color: #000;
   border-bottom-right-radius: 4px;
 }
 .msg.bot .msg-bubble {

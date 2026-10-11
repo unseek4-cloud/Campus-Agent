@@ -6,7 +6,7 @@ body[data-route="qa"] .search-pill { display: none; }
 body[data-route="qa"] .topbar { border-bottom-color: transparent; background: transparent; }
 .qa-viewport { padding: 0; overflow: hidden; }
 .qa-viewport .qa-layout { display: flex; height: 100%; min-height: 0; gap: 0; }
-.qa-viewport .qa-chat { flex: 1; min-width: 0; min-height: 0; border: 0; border-radius: 0; background: transparent; }
+.qa-viewport .qa-chat { flex: 1; min-width: 0; min-height: 0; border: 0; border-radius: 0; background: var(--bg-0); }
 .qa-viewport .qa-chat-head { flex: 0 0 auto; padding: 8px 28px 12px; border: 0; min-height: 46px; gap: 12px; }
 .qa-head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .qa-viewport .session-state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50%; color: var(--text-2); font-size: 13px; }
@@ -17,7 +17,6 @@ body[data-route="qa"] .topbar { border-bottom-color: transparent; background: tr
 .qa-viewport .msg.bot > .msg-bubble { background: transparent; border: 0; padding: 0; }
 .qa-viewport .msg.user .msg-bubble { padding: 12px 18px; border-radius: 18px 18px 4px 18px; }
 .qa-empty { width: min(100% - 48px, 860px); text-align: center; margin: 0 auto 30px; }
-.qa-brand-symbol { display: inline-grid; place-items: center; width: 48px; height: 48px; margin-bottom: 16px; color: var(--primary); font-size: 28px; border: 1px solid var(--border-strong); background: linear-gradient(135deg, var(--primary-glow), var(--tag-violet)); border-radius: 16px; }
 .qa-empty h1 { color: var(--text-1); font-size: clamp(24px, 2.5vw, 34px); letter-spacing: -.6px; font-weight: 600; }
 .qa-empty p { color: var(--text-2); margin-top: 12px; font-size: 14px; }
 .qa-viewport .qa-input-area { flex: 0 0 auto; width: min(100% - 56px, 860px); padding: 14px 0 18px; margin: 0 auto; border: 0; background: transparent; }

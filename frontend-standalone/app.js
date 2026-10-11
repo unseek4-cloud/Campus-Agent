@@ -1837,7 +1837,7 @@ function renderQA(vp) {
       <div class="qa-chat-head" id="qaActions" hidden><span class="session-state" id="sessionState">智能问答</span>
         <div class="qa-head-actions"><button class="btn btn-sm btn-ghost" onclick="openShareDialog()">⎘ 分享对话</button><button class="btn btn-sm btn-ghost" onclick="newConversation()">＋ 新对话</button></div>
       </div>
-      <div class="qa-empty" id="qaEmpty"><span class="qa-brand-symbol" aria-hidden="true">✦</span><h1>校园事务，从这里开始</h1><p>问政策、找材料、理清办理步骤。</p></div>
+      <div class="qa-empty" id="qaEmpty"><h1>校园事务，从这里开始</h1><p>问政策、找材料、理清办理步骤。</p></div>
       <div class="qa-chat-body" id="chatBody" aria-label="问答消息" aria-live="polite"></div>
       <div class="qa-input-area"><div class="qa-input-wrap">
         <textarea class="qa-input" id="qaInput" rows="1" aria-label="输入你的问题" maxlength="2000" placeholder="有什么校园事务想了解？"></textarea>
