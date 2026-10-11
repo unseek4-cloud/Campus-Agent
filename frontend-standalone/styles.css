@@ -870,31 +870,14 @@ body[data-auth="in"] #app { display: flex; }
 .material-item {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 12px 14px;
   border-radius: 10px;
   background: var(--bg-2);
   border: 1px solid var(--border);
 }
-.material-item .m-check {
-  width: 20px; height: 20px;
-  border-radius: 6px;
-  border: 1.5px solid var(--border-strong);
-  cursor: pointer;
-  display: grid; place-items: center;
-  font-size: 12px;
-  color: transparent;
-  flex-shrink: 0;
-  transition: all 0.2s;
-}
-.material-item.checked .m-check {
-  background: var(--success);
-  border-color: var(--success);
-  color: #0a0e1a;
-}
-.material-item.checked .m-name { text-decoration: line-through; color: var(--text-3); }
-.material-item .m-name { font-size: 13px; flex: 1; }
-.material-item .m-note { font-size: 11px; color: var(--text-3); }
+/* 描述推最右：原来靠 .m-name{flex:1} 撑开，现在名字在 SpringCheck 里 */
+.material-item .m-note { font-size: 11px; color: var(--text-3); margin-left: auto; }
 
 /* ====================== 政策管理 ====================== */
 .mgr-toolbar {
@@ -1304,18 +1287,17 @@ body[data-auth="must-change"] #changePwdForm { display: block; }
 .auth-brand-name { font-size: 17px; font-weight: 700; letter-spacing: 0.3px; }
 .auth-brand-sub { font-size: 11.5px; color: var(--text-3); margin-top: 1px; }
 
-/* BlurText：登录页标题的逐字模糊入场。字号/字重/行高与两行动效参数都收在这几个变量里，
+/* SplitText：登录页标题的逐字弹入。字号/字重/行高与两行动效参数都收在这几个变量里，
    兜底文本与挂载后的逐字结构共用；app.js 只负责拆字与排错，动效本身全在 CSS。
-   --bt-stagger / --bt-blur-from / --bt-shift 会被 app.js 读走
-   （见 mountAuthTitle），改这里就能整体调入场节奏。 */
+   --st-stagger / --st-shift 会被 app.js 读走（见 mountAuthTitle），
+   改这里就能整体调入场节奏。 */
 .auth-aside-title {
   --dt-font: 52px;
   --dt-weight: 900;               /* 参考图那种「黑体级」厚重感 */
-  --dt-line-height: 1.16;         /* 中文上下要留空隙；同时容纳入场时 blurTextLine 的 ±14px 位移 */
+  --dt-line-height: 1.16;         /* 中文上下要留空隙；同时容纳入场时 ±14px 的位移 */
   --dt-line-gap: 16px;            /* 两行之间的固定间距 */
-  --bt-stagger: 90ms;             /* 每个字的入场间隔；中文比原版拉丁字母调慢一档更从容 */
-  --bt-blur-from: 10px;           /* 起始模糊半径（原版默认值） */
-  --bt-shift: 14px;               /* 起始垂直位移：中文行盒高，位移比原版 50px 收敛 */
+  --st-stagger: 55ms;             /* 每个字的入场间隔：比原来 BlurText 的 90ms 更快 */
+  --st-shift: 14px;               /* 起始垂直位移：中文行盒高，位移比原版 40px 收敛 */
   display: flow-root;
   font-size: var(--dt-font);
   font-weight: var(--dt-weight);
@@ -1325,11 +1307,11 @@ body[data-auth="must-change"] #changePwdForm { display: block; }
 }
 /* 兜底：两行文本原样显示 */
 .auth-title-line { display: block; }
-/* 挂载后：一行的逐字容器。行距由 .blur-text__line 的 margin-top 定，
+/* 挂载后：一行的逐字容器。行距由 .split-text__line 的 margin-top 定，
    所以两个类都归零 margin，避免与 --dt-line-gap 叠加。 */
 .auth-title-line,
-.blur-text__line { margin: 0; }
-.blur-text__line + .blur-text__line { margin-top: var(--dt-line-gap); }
+.split-text__line { margin: 0; }
+.split-text__line + .split-text__line { margin-top: var(--dt-line-gap); }
 
 .auth-points { list-style: none; display: flex; flex-direction: column; gap: 16px; }
 .auth-points li { display: flex; gap: 12px; align-items: flex-start; }
@@ -2631,87 +2613,57 @@ body[data-drawer="open"] .sm-scrim {
   .sm-scrim { transition-duration: 0.05s; }
 }
 
-/* ====================== BlurText 逐字模糊入场 ======================
-   移植自 React Bits BlurText（原版为 React + framer-motion，无第三方依赖）。
-   结构：.blur-text > 多行 .blur-text__line > 每字一个 .blur-text__char。
-   原版用 motion 在 JS 里补间 filter/opacity/y；本项目零依赖、无构建，
-   所以改由 CSS @keyframes 补间，JS 只写 --bt-delay（第 n 个字 × stagger，
-   对应原版的 transition.delay = index * delay / 1000）与一次性触发。
-   原版的关键帧阶梯也照搬：blur(10px)/y:±50/opacity:0 → blur(5px)/y:∓5/opacity:.5
-   → blur(0)/y:0/opacity:1，两段时长各占总时长的 1/2（stepDuration 0.35s，
-   stepCount 3 → totalDuration 0.7s）。 */
-.blur-text {
-  --bt-tracking: -0.065em;        /* 沿用原版标题的紧凑字距 */
+/* ====================== SplitText 逐字弹入 ======================
+   移植自 React Bits SplitText（原版为 React + gsap + ScrollTrigger + SplitText 插件）。
+   结构：.split-text > 多行 .split-text__line > 每字一个 .split-text__char。
+   原版用 gsap.fromTo(拆分后的字符, from, to, { duration, ease, stagger }) 补间；
+   本项目零依赖、无构建，改由 CSS @keyframes 补间，JS 只写 --st-delay
+   （第 n 个字 × delay，对应原版的 stagger: delay / 1000）与一次性触发。
+   缓动：原版默认 'power3.out' 是纯缓出、没有回弹；按「弹动」的要求换成
+   back.out 型过冲曲线，字符会微微越过终位再落回。 */
+.split-text {
+  --st-tracking: -0.065em;        /* 沿用原版标题的紧凑字距 */
   display: block;
   width: max-content;
   max-width: 100%;
-  /* 透明缓冲：首屏逐字入场时 blur 与位移会溢出标题盒，
+  /* 透明缓冲：首屏逐字入场时位移会溢出标题盒，
      aside 是 flex 布局，不留这点余量就会压到下面的要点列表 */
   padding: 4px 0;
 }
-.blur-text__line {
+.split-text__line {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   line-height: var(--dt-line-height, 1.16);
 }
 /* 逐字：默认可读（脚本没跑时不至于隐形），动画只在挂载后由 .is-in 触发 */
-.blur-text__char {
+.split-text__char {
   display: inline-block;
-  letter-spacing: var(--bt-tracking, -0.065em);
+  letter-spacing: var(--st-tracking, -0.065em);
   /* 关键：负字距加在单字盒上会让中文左右各缩 ~3.25% 而互相重叠；
-     用等量负 margin 把这份「字内缩」还回去，视觉上只保留字间的紧凑感
-     （等价于原来 DepthText 把负字距加在整行文本上的效果）。 */
-  margin-right: calc(-1 * var(--bt-tracking, -0.065em));
-  will-change: transform, filter, opacity;
+     用等量负 margin 把这份「字内缩」还回去，视觉上只保留字间的紧凑感。 */
+  margin-right: calc(-1 * var(--st-tracking, -0.065em));
+  will-change: transform, opacity;
 }
-.blur-text.is-in .blur-text__char {
-  animation: blur-text-in var(--bt-duration, 700ms) cubic-bezier(0.22, 0.61, 0.36, 1) var(--bt-delay, 0ms) both;
+.split-text.is-in .split-text__char {
+  animation: split-text-in var(--st-duration, 520ms) var(--st-ease, cubic-bezier(0.34, 1.8, 0.64, 1)) var(--st-delay, 0ms) both;
 }
-@keyframes blur-text-in {
+/* from { opacity: 0, y: 14 } → to { opacity: 1, y: 0 }；过冲由缓动曲线给 */
+@keyframes split-text-in {
   0% {
     opacity: 0;
-    filter: blur(var(--bt-blur-from, 10px));
-    transform: translateY(calc(var(--bt-shift, 14px) * -1));
-  }
-  50% {
-    opacity: 0.5;
-    filter: blur(calc(var(--bt-blur-from, 10px) * 0.5));
-    transform: translateY(calc(var(--bt-shift, 14px) * 0.33));
+    transform: translateY(var(--st-shift, 14px));
   }
   100% {
     opacity: 1;
-    filter: blur(0);
     transform: translateY(0);
   }
 }
-/* direction="bottom"：从下方浮起（对应原版 direction 属性） */
-.blur-text--bottom.is-in .blur-text__char {
-  animation-name: blur-text-in-bottom;
-}
-@keyframes blur-text-in-bottom {
-  0% {
-    opacity: 0;
-    filter: blur(var(--bt-blur-from, 10px));
-    transform: translateY(var(--bt-shift, 14px));
-  }
-  50% {
-    opacity: 0.5;
-    filter: blur(calc(var(--bt-blur-from, 10px) * 0.5));
-    transform: translateY(calc(var(--bt-shift, 14px) * -0.33));
-  }
-  100% {
-    opacity: 1;
-    filter: blur(0);
-    transform: translateY(0);
-  }
-}
-/* 减弱动效：不做模糊/位移补间，直接落在终态（同样不闪一下空白） */
+/* 减弱动效：不做位移补间，直接落在终态（同样不闪一下空白） */
 @media (prefers-reduced-motion: reduce) {
-  .blur-text.is-in .blur-text__char {
+  .split-text.is-in .split-text__char {
     animation: none;
     opacity: 1;
-    filter: none;
     transform: none;
     will-change: auto;
   }

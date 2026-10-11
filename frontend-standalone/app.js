@@ -758,84 +758,81 @@ async function settleLatticeLoader(handle, status) {
 }
 
 /* ============================================================
-   BlurText · 逐字模糊入场（登录页标题）
-   移植自 React Bits BlurText（原版为 React + framer-motion）。
-   本项目零依赖、无构建，所以原版由 motion 在 JS 里做的补间改由 CSS @keyframes
-   承担，原版参数逐项保留：
-     - animateBy：'words' 按空格切词、'letters' 逐字切；原版对空格也发一个
-       <span>（渲染成 \u00A0）并占用一个动画序号 —— 中文标题没空格，走 letters；
-     - direction：'top' 从上方落下、'bottom' 从下方浮起；
-     - delay / stepDuration：第 n 段延迟 = n × delay，单段时长 = stepDuration ×
-       (stepCount - 1)（stepCount = 关键帧数 + 1，见原版 totalDuration 的算法）；
-     - threshold / rootMargin：IntersectionObserver 触发，进场后 unobserve；
-     - easing：原版默认 easing = t => t（线性），这里默认 cubic-bezier 缓出，
-       线性在中文逐字入场时显得发涩（差异见下面 EASING 注释）。
+   SplitText · 逐字弹入（登录页标题）
+   移植自 React Bits SplitText（原版为 React + gsap + ScrollTrigger + SplitText 插件）。
+   本项目零依赖、无构建，所以原版由 gsap 承担的部分按下面的方式等价替换：
+     - SplitText 插件的拆字 → 这里按 Array.from 逐字拆成 .split-text__char，
+       每行一个 .split-text__line（空格渲染成 \u00A0 占位）；
+     - gsap.fromTo(targets, from, to, { duration, ease, stagger }) → CSS @keyframes
+       承担补间，JS 只写第 n 个字的 --st-delay = n × delay（对应 stagger: delay/1000）；
+     - from / to 默认 { opacity: 0, y: 40 } / { opacity: 1, y: 0 }：y 是「从下方升起」，
+       40px 是拉丁字母的尺度，中文行盒窄，这里收到 14px（否则会压到下一行）；
+     - ease 默认 'power3.out' 是纯缓出、没有回弹；按「弹动」的要求换成 back.out 型
+       过冲曲线 cubic-bezier(0.34, 1.8, 0.64, 1)，字符会越过终位约 2.5px 再落回；
+     - threshold / rootMargin：IntersectionObserver 触发（对应原版 ScrollTrigger
+       的 start 计算与 once: true），进场后立即 unobserve。
    与 React 版的差异（都是无构建 + 中文标题带来的）：
-     - 原版一个实例一行文本，这里两行共用一个 .blur-text 容器（各占一个
-       .blur-text__line），逐字延迟跨行连续累加，读起来是一句话而不是两段；
-     - 逐字 span 在 .blur-text__line 的 flex 容器里换行，避免中文长句溢出侧栏；
-     - 逐字时字距按每个字单独算，与原来 DepthText 的 -0.065em 紧凑字距对齐；
+     - 原版一个实例一行文本，这里两行共用一个 .split-text 容器（各占一个
+       .split-text__line），逐字延迟跨行连续累加，读起来是一句话而不是两段；
+     - 逐字 span 在 .split-text__line 的 flex 容器里换行，避免中文长句溢出侧栏；
+     - 逐字时字距按每个字单独算，与原来的 -0.065em 紧凑字距对齐；
      - prefers-reduced-motion：不加动画，直接落在终态。
    ============================================================ */
-const BLUR_TEXT = {
-  animateBy: "letters",           // 'words' | 'letters'（原版默认 words，中文自动走 letters）
-  direction: "top",               // 'top' | 'bottom'
-  delay: 90,                      // 每字入场间隔(ms)
-  stepDuration: 0.35,             // 单段补间时长(s)，原版默认值
+const SPLIT_TEXT = {
+  splitType: "chars",             // 原版默认 chars；中文没有词边界，逐字即最小单位
+  delay: 55,                      // 每字入场间隔(ms)：比原版默认 50ms 略慢一点，
+                                  // 但比原来 BlurText 的 90ms 明显更快
+  duration: 0.52,                 // 单字补间时长(s)：原版默认 1.25s，这里收紧
+  ease: "cubic-bezier(0.34, 1.8, 0.64, 1)",    // back.out 型过冲 ≈ 越过终位 2.5px = 「弹动」
+  from: { opacity: 0, y: 14 },    // 原版默认 y:40 是拉丁字母尺度，中文行盒窄
+  to: { opacity: 1, y: 0 },
   threshold: 0.1,                 // 原版默认值
   rootMargin: "0px",              // 原版默认值
-  blurFrom: 10,                   // 起始模糊半径(px)，原版默认值
-  shift: 14,                      // 起始垂直位移(px)。原版 50px 是拉丁字母的尺度，
-                                  // 中文行盒窄，14px 才不会和上一行打架
   className: ""
 };
-/* 原版 easing = t => t 是恒等（线性）。线性起步太硬，这里换成缓出曲线：
-   CSS 的 cubic-bezier 与 CSS 变量一起写在 .blur-text 段（styles.css）。 */
+/* 缓动说明：原版默认 ease 是 gsap 的 'power3.out'（纯缓出、无回弹）。这里按
+   「弹动」的要求换成 back.out 型过冲曲线。CSS 变量与关键帧写在 styles.css 的
+   .split-text 段。 */
 
-/* prefers-reduced-motion：BlurText 与其他动效组件共用（原来在 DepthText 段里定义）。 */
+/* prefers-reduced-motion：SplitText 与其他动效组件共用。 */
 const motionReduced = () => window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
 
-/** 按 animateBy 切分：保持与原版一致的空格语义（空格也占一个动画序号）。 */
-function blurTextSegments(line, animateBy) {
-  if (animateBy === "words" && /\s/.test(line)) {
-    return line.split(/\s+/).filter(Boolean).map(word => ({ text: word, space: true }));
-  }
-  // 中文没有词边界，逐字切；Array.from 保证 emoji/代理对不被拆坏
-  return Array.from(line).map(char => ({ text: char, space: false }));
+/** 逐字切分：Array.from 保证 emoji / 代理对不被拆坏；空格渲染成 \u00A0 占位。 */
+function splitTextChars(line) {
+  return Array.from(line).map(char => (char === " " ? "\u00A0" : char));
 }
 
-/* 组件结构：两行文本 → 一个 .blur-text（每行一个 .blur-text__line，逐字一个 span）。
-   动效本身（关键帧、时长、缓动）全在 styles.css，这里只写 --bt-delay 序号延迟。 */
-function blurTextHTML(lines, opts = {}) {
-  const o = { ...BLUR_TEXT, ...opts };
-  const direction = o.direction === "bottom" ? "bottom" : "top";
-  const stepCount = 3;            // 原版：from + 两段关键帧 → times = [0, 0.5, 1]
-  const durationMs = Math.round(Math.max(0, Number(o.stepDuration) || 0) * (stepCount - 1) * 1000);
+/* 组件结构：两行文本 → 一个 .split-text（每行一个 .split-text__line，每字一个 span）。
+   动效本身（关键帧、时长、缓动）全在 styles.css，这里只写 --st-delay 序号延迟。 */
+function splitTextHTML(lines, opts = {}) {
+  const o = { ...SPLIT_TEXT, ...opts };
+  const durationMs = Math.round(Math.max(0, Number(o.duration) || 0) * 1000);
   const staggerMs = Math.max(0, Number(o.delay) || 0);
   const chars = [];               // 平铺所有字，跨行连续编号
   const lineHTML = lines.map(line => {
-    const body = blurTextSegments(line, o.animateBy).map(seg => {
+    const body = splitTextChars(line).map(char => {
       const index = chars.length;
-      chars.push(seg);
-      const gap = seg.space ? " " : "";
-      return `<span class="blur-text__char" style="--bt-delay:${index * staggerMs}ms" aria-hidden="true">${escapeHtml(seg.text)}${gap}</span>`;
+      chars.push(char);
+      return `<span class="split-text__char" style="--st-delay:${index * staggerMs}ms" aria-hidden="true">${escapeHtml(char)}</span>`;
     }).join("");
     // 每行是 block，行距交给 CSS（--dt-line-gap），所以这里不写行内 margin
-    return `<span class="blur-text__line">${body}</span>`;
+    return `<span class="split-text__line">${body}</span>`;
   }).join("");
-  const cls = ["blur-text", direction === "bottom" ? "blur-text--bottom" : "", o.className].filter(Boolean).join(" ");
-  const style = `--bt-duration:${durationMs}ms;--bt-blur-from:${Math.max(0, Number(o.blurFrom) || 0)}px;--bt-shift:${Math.max(0, Number(o.shift) || 0)}px`;
+  const cls = ["split-text", o.className].filter(Boolean).join(" ");
+  const shift = Math.max(0, Number((o.from || {}).y) || 0);
+  const style = `--st-duration:${durationMs}ms;--st-ease:${o.ease};--st-shift:${shift}px`;
   // 逐字 span 都是 aria-hidden，可读文本由 <h1> 的 aria-label 提供（见 mountAuthTitle）
-  return `<span class="${cls}" style="${style}" data-blur-text>${lineHTML}</span>`;
+  return `<span class="${cls}" style="${style}" data-split-text>${lineHTML}</span>`;
 }
 
-/* 挂载：IntersectionObserver 进场后加 .is-in 触发 CSS 动画。
+/* 挂载：IntersectionObserver 进场后加 .is-in 触发 CSS 动画
+   （对应原版 ScrollTrigger 的 once: true —— 触发后立即 unobserve）。
    返回 { root, chars, kill }；reduced=true 时直接标成已进场（不加动画）。 */
-function mountBlurText(root, opts = {}) {
-  const o = { ...BLUR_TEXT, ...opts };
-  const el = $(".blur-text", root);
+function mountSplitText(root, opts = {}) {
+  const o = { ...SPLIT_TEXT, ...opts };
+  const el = $(".split-text", root);
   if (!el) return null;
-  const chars = $$(".blur-text__char", el);
+  const chars = $$(".split-text__char", el);
   let observer = null;
   let fallbackTimer = 0;
 
@@ -843,11 +840,11 @@ function mountBlurText(root, opts = {}) {
     if (observer) { observer.disconnect(); observer = null; }
     if (fallbackTimer) { clearTimeout(fallbackTimer); fallbackTimer = 0; }
     el.classList.add("is-in");
-    if (typeof o.onAnimationComplete === "function") {
-      // 等最后一个字的延迟 + 单段时长走完（原版是等最后一个 motion.span 的 onAnimationComplete）
-      const duration = parseFloat(el.style.getPropertyValue("--bt-duration")) || 700;
+    if (typeof o.onLetterAnimationComplete === "function") {
+      // 等最后一个字的延迟 + 单字时长走完（原版是等最后一个字符补间完成）
+      const duration = parseFloat(el.style.getPropertyValue("--st-duration")) || 520;
       const last = Math.max(0, chars.length - 1) * (Number(o.delay) || 0);
-      setTimeout(o.onAnimationComplete, duration + last + 30);
+      setTimeout(o.onLetterAnimationComplete, duration + last + 30);
     }
   };
 
@@ -898,15 +895,14 @@ function mountAuthTitle() {
   const cs = getComputedStyle(title);
   const num = name => parseFloat(cs.getPropertyValue(name)) || 0;
   const opts = {
-    delay: num("--bt-stagger") || BLUR_TEXT.delay,
-    blurFrom: num("--bt-blur-from") || BLUR_TEXT.blurFrom,
-    shift: num("--bt-shift") || BLUR_TEXT.shift
+    delay: num("--st-stagger") || SPLIT_TEXT.delay,
+    from: { opacity: 0, y: num("--st-shift") || SPLIT_TEXT.from.y }
   };
   authTitleHandle?.kill();
   title.dataset.titleLines = JSON.stringify(lines);
   title.setAttribute("aria-label", lines.join(""));
-  title.innerHTML = blurTextHTML(lines, opts);
-  authTitleHandle = mountBlurText(title, opts);
+  title.innerHTML = splitTextHTML(lines, opts);
+  authTitleHandle = mountSplitText(title, opts);
   return authTitleHandle;
 }
 
@@ -942,7 +938,7 @@ let dashboardStats = { total: 0, success: 0, failed: 0, processing: 0, chunks: 0
    sessionStorage 里的 ca-user 只用于避免界面闪烁，不作为登录凭证。 */
 document.addEventListener("DOMContentLoaded", async () => {
   initTheme();
-  initAuthTitle();          // BlurText：登录页标题逐字模糊入场（首屏立即挂，不等鉴权结果）
+  initAuthTitle();          // SplitText：登录页标题逐字弹入（首屏立即挂，不等鉴权结果）
   bindAuthForms();
   // 公开分享页优先：不需要登录，也不调用 /api/auth/me
   if (isShareHash()) { renderPublicShare(shareTokenFromHash()); return; }
@@ -3356,9 +3352,9 @@ async function showAffair(id) {
           <h4>材料清单（${materials.length}）</h4>
           <div class="material-list">
             ${materials.map(m => `
-              <div class="material-item" onclick="this.classList.toggle('checked')">
-                <div class="m-check">✓</div>
-                <div class="m-name">${escapeHtml(m.name || '')}${m.required ? ' <span class="req">必交</span>' : ' <span class="opt">选交</span>'}</div>
+              <div class="material-item" data-spring-row>
+                <span data-spring-check data-label="${escAttr(m.name || '')}" data-box="20" data-radius="6" data-font="13" data-row="20"></span>
+                ${m.required ? '<span class="req">必交</span>' : '<span class="opt">选交</span>'}
                 <div class="m-note">${escapeHtml(m.description || '')}</div>
                 ${m.attachment ? `<a class="link-btn" href="${API_BASE}/api/files/${m.attachment.id}/download" target="_blank" rel="noopener" onclick="event.stopPropagation()">下载模板</a>` : ''}
               </div>
@@ -3373,6 +3369,8 @@ async function showAffair(id) {
         </div>
       </div>
     `, "affair-modal");
+    /* 材料清单的勾选动效：把 [data-spring-check] 占位替换成 SpringCheck 实例 */
+    window.SpringCheck?.mount($('#detailModal'));
   } catch (e) {
     openModal(`
       <div class="detail-head">

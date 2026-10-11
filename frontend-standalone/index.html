@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="chat-workspace.css" />
   <link rel="stylesheet" href="reply-feedback.css" />
   <link rel="stylesheet" href="chat-rail.css" />
+  <link rel="stylesheet" href="spring-check.css" />
 </head>
 <body data-auth="pending">
   <!-- ===== 登录页 =====
@@ -45,9 +46,9 @@
           </div>
         </div>
 
-        <!-- 标题：BlurText 逐字模糊入场（React Bits 移植，见 app.js 的 BlurText 段）
+        <!-- 标题：SplitText 逐字弹入（React Bits 移植，见 app.js 的 SplitText 段）
              这两行 <span> 是兜底文本：脚本没执行时按普通标题显示，
-             挂载成功后由 JS 拆成逐字 <span>，按 blur + 位移 + 透明度逐个入场。 -->
+             挂载成功后由 JS 拆成逐字 <span>，按 位移 + 透明度 逐个弹入。 -->
         <h1 class="auth-aside-title" id="authTitle">
           <span class="auth-title-line">高校事务智能问答</span>
           <span class="auth-title-line">与办事引导系统</span>
@@ -302,6 +303,7 @@
   <script src="reply-feedback.js"></script>
   <script src="ai-quality.js"></script>
   <script src="chat-rail.js"></script>
+  <script src="spring-check.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
