@@ -1,0 +1,159 @@
+/* ============================================================
+   问答页右侧「行边栏」· 对话轮次刻度轨
+   ------------------------------------------------------------
+   位置：问答页最右边（.qa-chat 的右侧边缘），不占用左侧导航。
+   内容：当前对话的每一轮一条刻度，从上到下按轮次排列。
+
+   邻近度行为（参考 React Bits LineSidebar 的邻近感应）：
+     - 鼠标在右侧感应区内移动时，靠近的刻度变长、变亮，并浮出这一轮的
+       问题摘要；对应的消息在聊天区同步高亮，眼手一一对应；
+     - 鼠标远离右侧或不在此页时，只剩一排很淡的刻度（行边栏"不明显"）；
+     - 点击刻度滚动到该轮，键盘 Tab 到刻度同样会亮起并显示摘要。
+
+   --effect(0..1) 由 chat-rail.js 直接写行内值，视觉过渡交给下面这些
+   派生属性的 transition，因此不需要额外的 rAF 循环。
+   ============================================================ */
+
+.qa-chat { position: relative; }
+
+.qa-rail {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--rail-gap, 14px);
+  z-index: 3;
+}
+
+/* 纵向脊线：把刻度串成"一条边栏"。会话只有一两轮时，全靠它保证
+   这条轨仍然看得出来，而不是变成孤零零的一根短线。 */
+.qa-rail::before {
+  content: '';
+  position: absolute;
+  right: 1px;
+  top: -16px;
+  bottom: -16px;
+  width: 1px;
+  background: linear-gradient(180deg,
+    transparent,
+    color-mix(in srgb, var(--primary) 34%, transparent) 20%,
+    color-mix(in srgb, var(--primary) 34%, transparent) 80%,
+    transparent);
+  pointer-events: none;
+}
+
+/* 没有任何轮次时不画脊线：空会话里它只会像一条多余的滚动条 */
+.qa-rail.is-empty::before { display: none; }
+
+/* ---------------- 刻度 ---------------- */
+.qa-rail__tick {
+  --effect: 0;
+  position: relative;
+  width: 22px;                 /* 命中区，比刻度本身宽，方便靠近 */
+  height: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: grid;
+  place-items: center end;
+}
+
+.qa-rail__tick::after {
+  content: '';
+  display: block;
+  height: 2px;
+  width: 16px;
+  border-radius: 1px;
+  transform-origin: right center;
+  transform: scaleX(calc(0.46 + var(--effect) * 0.54));
+  background: color-mix(in srgb, var(--primary) calc(var(--effect) * 100%), var(--text-3));
+  opacity: calc(0.42 + var(--effect) * 0.58);
+  transition: transform .18s ease, opacity .18s ease, background-color .18s ease;
+}
+
+/* 当前视口内的轮次：稍微可见一点，方便定位，但不抢邻近度 */
+.qa-rail__tick.is-inview::after { opacity: calc(0.62 + var(--effect) * 0.38); }
+
+.qa-rail__tick:focus-visible { outline: none; }
+.qa-rail__tick:focus-visible::after {
+  transform: scaleX(1);
+  opacity: 1;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+/* ---------------- 邻近时浮出的该轮摘要 ----------------
+   两行结构：第一行是用户提问（正文色、加粗），第二行是 AI 回答的开头
+   （弱化色），回答由 chat-rail.js 截到 ANSWER_PREVIEW_CHARS 个字后加省略号。 */
+.qa-rail__label {
+  position: absolute;
+  right: calc(100% + 12px);
+  top: 50%;
+  /* 轨道自身只有 22px 宽，绝对定位若只给 right 会触发 shrink-to-fit 把
+     中文压成竖排；用 max-content 让短内容紧凑、长内容在 300px 处换行。 */
+  width: max-content;
+  max-width: min(300px, 32vw);
+  padding: 10px 13px;
+  border-radius: 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-lg);
+  text-align: left;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(10px);
+  transition: opacity .18s ease, transform .18s ease;
+}
+
+.qa-rail__label.is-on { opacity: 1; transform: translateY(-50%) translateX(0); }
+
+/* 提问：卡片的主行，最多两行 */
+.qa-rail__q {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  color: var(--text-1);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+/* 回答开头：弱化，最多三行 */
+.qa-rail__a {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  margin-top: 4px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* 这一轮还没有回答时（例如只落了提问），只显示提问那一行 */
+.qa-rail__a:empty { display: none; }
+
+/* ---------------- 被指向的那一轮在聊天区同步高亮 ---------------- */
+.qa-chat-body .msg.rail-focus {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  border-radius: 14px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 18%, transparent);
+  transition: background-color .2s ease, box-shadow .2s ease;
+}
+
+/* ---------------- 窄屏与触摸：没有可悬停的余地，整条隐藏 ---------------- */
+@media (max-width: 1080px) { .qa-rail { display: none; } }
+@media (hover: none) { .qa-rail { display: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .qa-rail__tick::after,
+  .qa-rail__label,
+  .qa-chat-body .msg.rail-focus { transition: none; }
+}

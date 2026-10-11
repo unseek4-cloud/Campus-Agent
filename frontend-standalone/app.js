@@ -1338,6 +1338,7 @@ function navigate(route, { preserveHash = false } = {}) {
   const vp = $("#viewport");
   destroyDocFolder();     // 离开仪表盘前停掉漂浮物理
   destroyLatticeLoaders(); // 离开问答页前停掉秒表
+  window.ChatRail?.detach(); // 离开问答页前卸掉右侧行边栏
   vp.classList.toggle("qa-viewport", route === "qa");
   vp.innerHTML = "";
   vp.classList.remove("fade-in");
@@ -1822,6 +1823,8 @@ function syncChatState() {
   if (input) input.disabled = chatLoading || chatPending;
   $$('.qa-suggestion').forEach(button => button.disabled = !chatAvailable());
   $('#chatStatus') && ($('#chatStatus').textContent = chatLoading ? '正在载入对话…' : chatBusy || chatPending ? '正在生成回答…' : '');
+  /* 右侧行边栏：消息列表变化后同步刻度（内部按消息元素身份去重，可安全频繁调用） */
+  window.ChatRail?.sync();
 }
 function scrollChatToReply(body, reply) {
   if (reply?.querySelector('.service-guide')) {
