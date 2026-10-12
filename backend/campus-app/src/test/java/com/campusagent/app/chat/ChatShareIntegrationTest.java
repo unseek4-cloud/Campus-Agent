@@ -207,7 +207,7 @@ class ChatShareIntegrationTest {
         String whole = share(zhang, id);
         assertNotEquals(answerToken, whole);
         assertEquals(2, data(publicView(whole).andReturn()).path("messages").size());
-        assertEquals(0, data(publicView(whole).andReturn()).path("messageIds").size());
+        assertEquals(2, data(publicView(whole).andReturn()).path("messageIds").size());
         assertEquals(3, jdbc.queryForObject("SELECT COUNT(*) FROM ai_conversation_share", Integer.class));
 
         // 不属于该会话的消息 id 必须拒绝
@@ -222,6 +222,39 @@ class ChatShareIntegrationTest {
         publicView(answerToken).andExpect(status().isNotFound());
         publicView(userToken).andExpect(status().isOk());
         publicView(whole).andExpect(status().isOk());
+    }
+
+    @Test void wholeShareFreezesMessagesAndTitleBeforeLaterTurns() throws Exception {
+        long id = conversationWithAnswer(zhang, "分享前的问题");
+        String token = share(zhang,id);
+        String title = data(publicView(token).andReturn()).path("title").asText();
+        mvc.perform(csrf(post("/api/rag/chat").cookie(zhang)).contentType("application/json")
+                .content(json.writeValueAsBytes(Map.of("query","分享后的私密问题","conversationId",id,"requestId",UUID.randomUUID().toString()))))
+                .andExpect(status().isOk());
+        jdbc.update("UPDATE ai_conversation SET title='后来修改的标题' WHERE id=?",id);
+        var view = data(publicView(token).andReturn());
+        assertEquals(2,view.path("messages").size());
+        assertEquals(title,view.path("title").asText());
+        assertFalse(view.toString().contains("分享后的私密问题"));
+        String next = share(zhang,id);
+        assertNotEquals(token,next);
+        assertEquals(4,data(publicView(next).andReturn()).path("messages").size());
+    }
+
+    @Test void legacyWholeShareOnlyReadsMessagesBeforeCreation() throws Exception {
+        long id = conversationWithAnswer(zhang,"旧分享");
+        String token = share(zhang,id);
+        jdbc.update("UPDATE ai_conversation_share SET message_ids=NULL WHERE token=?",token);
+        // Model a later message without relying on wall-clock sleeps or timestamp precision.
+        jdbc.update("INSERT INTO ai_message(conversation_id,request_id,role,content,created_at) VALUES (?,?,?, ?,?)",
+                id,UUID.randomUUID().toString(),"USER","后续私密消息",Timestamp.valueOf(LocalDateTime.now().plusMinutes(1)));
+        assertEquals(2,data(publicView(token).andReturn()).path("messages").size());
+    }
+
+    @Test void emptyConversationsCannotProducePublicLinks() throws Exception {
+        long id = data(mvc.perform(csrf(post("/api/chat/conversations").cookie(zhang))).andReturn()).path("id").asLong();
+        mvc.perform(csrf(post("/api/chat/conversations/"+id+"/shares").cookie(zhang)))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("SHARE_EMPTY"));
     }
 
     @Test void deletingConversationRemovesItsSharesAndMigrationIsRepeatable() throws Exception {

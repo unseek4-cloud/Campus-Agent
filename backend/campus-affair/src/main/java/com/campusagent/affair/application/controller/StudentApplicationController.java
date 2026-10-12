@@ -28,12 +28,13 @@ public class StudentApplicationController {
         return ApiResponse.success(service.detail(id,user.user()));
     }
     @PostMapping(consumes="multipart/form-data") public ApiResponse<ApplicationDetail> create(@RequestParam long serviceItemId,
-            @RequestParam String studentRemark, @RequestPart(value="files",required=false) List<MultipartFile> files, @AuthenticationPrincipal UserPrincipal user) {
-        return ApiResponse.success(service.create(user.user(),serviceItemId,studentRemark,files==null ? List.of() : files));
+            @RequestParam String studentRemark, @RequestPart(value="files",required=false) List<MultipartFile> files,
+            @RequestParam(value="materialIds",required=false) List<String> materialIds, @AuthenticationPrincipal UserPrincipal user) {
+        return ApiResponse.success(service.create(user.user(),serviceItemId,studentRemark,files==null ? List.of() : files,materialIds));
     }
     @PostMapping(value="/{id}/resubmit", consumes="multipart/form-data") public ApiResponse<ApplicationDetail> resubmit(@PathVariable long id,
             @RequestParam int version, @RequestParam String studentRemark, @RequestPart(value="files",required=false) List<MultipartFile> files,
-            @AuthenticationPrincipal UserPrincipal user) {
-        return ApiResponse.success(service.resubmit(id,user.user(),version,studentRemark,files==null ? List.of() : files));
+            @RequestParam(value="materialIds",required=false) List<String> materialIds, @AuthenticationPrincipal UserPrincipal user) {
+        return ApiResponse.success(service.resubmit(id,user.user(),version,studentRemark,files==null ? List.of() : files,materialIds));
     }
 }

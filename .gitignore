@@ -27,6 +27,8 @@ ai-service/.venv/
 ai-service/venv/
 ai-service/__pycache__/
 ai-service/**/*.py[cod]
+scripts/**/__pycache__/
+scripts/**/*.py[cod]
 ai-service/.pytest_cache/
 ai-service/.mypy_cache/
 ai-service/.ruff_cache/

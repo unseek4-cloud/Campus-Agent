@@ -172,7 +172,7 @@ const ERROR_HINTS = {
   EMBEDDING_UNAVAILABLE:
     "AI 服务的 Embedding 模型不可用，通常是本地模型缓存缺失且无法联网下载。处理：设 HF_ENDPOINT=https://hf-mirror.com 下载一次，或确认 HF_HUB_OFFLINE 与缓存目录是否匹配。",
   RERANK_UNAVAILABLE:
-    "AI 服务的重排模型不可用。重排是出答案的硬前提（缺它时检索到的证据会被全部过滤，表现为“暂未找到相关信息”）。处理：确认 BAAI/bge-reranker-base 已在本地缓存，或临时关闭重排并调整阈值。",
+    "AI 问答的证据校验暂不可用。请启用 AI_RERANK_ENABLED，并确认配置的重排模型已下载且可以加载。关闭重排只支持普通检索，不能用于生成问答；这不表示知识库没有相关资料。",
   DOCUMENT_EXTRACTION_FAILED:
     "文档解析失败。若是扫描件，需要 OCR 能力：云端走千问（AI_QWEN_OCR_ENABLED=true + Key），本地走 PaddleOCR（需安装 paddleocr/paddlepaddle）。",
   DOCUMENT_HAS_NO_TEXT: "该文档没有可提取的文本层（纯图片页），需要 OCR 支持。",
@@ -3026,6 +3026,7 @@ async function showApplicationDetail(id, adminView = false) {
                   <div class="li-ico">▤</div>
                   <div class="li-body">
                     <div class="li-title">${escapeHtml(f.filename || "-")}</div>
+                    ${f.materialName ? `<div class="li-meta">对应材料：${escapeHtml(f.materialName)}</div>` : ''}
                     <div class="li-meta">${Math.max(1, Math.round((f.fileSize || 0) / 1024))} KB · ${fmtTime(f.uploadedAt)}</div>
                   </div>
                   <a class="btn btn-sm" href="${API_BASE}${fileBase}/${f.id}/download" target="_blank" rel="noopener">下载</a>
@@ -3464,7 +3465,7 @@ async function renderPolicyMgr(vp) {
 
 async function loadPolicyList() {
   try {
-    const data = await apiGet("/api/admin/documents?page=1&pageSize=50");
+    const data = await apiGet("/api/admin/documents?page=1&pageSize=100");
     const items = data?.items || [];
     const total = data?.total || 0;
     const tbody = $("#policyTableBody");
@@ -4174,6 +4175,7 @@ async function openNewApplication(serviceId) {
           <div class="form-row">
             <label for="appFiles">申请材料 ${limit ? `<span class="label-note">${limit}</span>` : ""}</label>
             <input type="file" id="appFiles" class="input" multiple ${accept ? `accept="${accept}"` : ""} />
+            <div id="appMaterialBindings"></div>
             <div class="form-hint" id="appReqHint"></div>
           </div>
           <div class="auth-alert" id="appErr" hidden></div>
@@ -4186,6 +4188,12 @@ async function openNewApplication(serviceId) {
     if (appServiceCache.length) {
       $("#appService").addEventListener("change", refreshServiceBrief);
       $("#appSubmit").addEventListener("click", submitNewApplication);
+      $("#appFiles").addEventListener("change", () => {
+        const item = appServiceCache.find(s => s.id === Number($("#appService").value));
+        window.CampusApplicationMaterials.render($("#appMaterialBindings"), $("#appFiles").files, item?.materials || []);
+        $("#appErr").hidden = true;
+      });
+      $("#appMaterialBindings").addEventListener("change", () => { $("#appErr").hidden = true; });
       refreshServiceBrief();
     }
   } catch (e) {
@@ -4201,6 +4209,9 @@ async function refreshServiceBrief() {
   const s = appServiceCache.find(x => x.id === id);
   const materials = s?.materials || [];
   const required = materials.filter(m => m.required);
+  $("#appFiles").value = '';
+  window.CampusApplicationMaterials.render($("#appMaterialBindings"), [], materials);
+  $("#appErr").hidden = true;
   box.innerHTML = !s ? "" : `
     <div class="service-brief">
       <div class="brief-title">${escapeHtml(s.name)}
@@ -4213,8 +4224,8 @@ async function refreshServiceBrief() {
       <div id="appActiveHint"></div>
     </div>`;
   hint.innerHTML = required.length
-    ? `该事项有 <b>${required.length}</b> 项必交材料，后端要求至少上传一个文件：${required.map(m => escapeHtml(m.name)).join("、")}`
-    : "该事项没有必交材料，可只填写说明直接提交（后端允许 files 为空）。";
+    ? `请逐项上传并选择对应材料：${required.map(m => escapeHtml(m.name)).join("、")}。材料内容以管理员审核为准。`
+    : "该事项没有必交材料，可只填写说明直接提交。";
   try {
     const active = await apiGet(`/api/student/applications/active?serviceItemId=${id}`);
     const holder = $("#appActiveHint");
@@ -4227,14 +4238,19 @@ async function refreshServiceBrief() {
 async function submitNewApplication() {
   const sel = $("#appService"), err = $("#appErr"), btn = $("#appSubmit");
   const remark = ($("#appRemark")?.value || "").trim();
-  const files = $("#appFiles")?.files;
-  const fail = (m) => { err.hidden = false; err.textContent = m; };
-  if (!sel) return;
+  const files = [...($("#appFiles")?.files || [])];
+  const fail = (m) => { err.hidden = false; err.textContent = m; btn.disabled = false; btn.textContent = '提交申请'; };
+  if (!sel || !btn || btn.disabled) return;
+  btn.disabled = true;
   if (!remark) return fail("请填写申请说明（后端必填）");
   if (remark.length > 4000) return fail("申请说明不能超过 4000 字");
   const cfg = await loadUploadConfig();
   const fileError = validateFiles(files || [], cfg);
   if (fileError) return fail(fileError);
+  const materials = appServiceCache.find(s => s.id === Number(sel.value))?.materials || [];
+  let materialIds;
+  try { materialIds = window.CampusApplicationMaterials.selection($("#appMaterialBindings"), files, materials, true); }
+  catch (e) { return fail(e.message); }
 
   err.hidden = true;
   btn.disabled = true;
@@ -4242,7 +4258,7 @@ async function submitNewApplication() {
   const fd = new FormData();
   fd.append("serviceItemId", sel.value);
   fd.append("studentRemark", remark);
-  if (files) [...files].forEach(f => fd.append("files", f));
+  window.CampusApplicationMaterials.append(fd, files, materialIds);
   try {
     const created = await apiUpload("/api/student/applications", fd);
     const no = created?.application?.applicationNo;
@@ -4260,7 +4276,11 @@ window.submitNewApplication = submitNewApplication;
 
 /* ---------- 补充材料（仅 NEED_MORE 可提交） ---------- */
 async function openResubmit(id, version) {
-  const cfg = await loadUploadConfig();
+  let detail, cfg;
+  try { [detail, cfg] = await Promise.all([apiGet(`/api/student/applications/${id}`), loadUploadConfig()]); }
+  catch (e) { toast(e.message || '无法加载申请材料要求', 'error'); return; }
+  const materials = detail?.materials || [];
+  version = detail?.application?.version ?? version;
   const accept = cfg ? cfg.extensions.map(e => "." + e).join(",") : "";
   openModal(`
     <div class="detail-head">
@@ -4275,7 +4295,8 @@ async function openResubmit(id, version) {
       <div class="form-row">
         <label for="resubFiles">补充材料 * <span class="label-note">${cfg ? `≤${cfg.maxFiles} 个 · 单个 ≤${cfg.maxUploadSizeMb}MB · ${cfg.extensions.join(" / ")}` : ""}</span></label>
         <input type="file" id="resubFiles" class="input" multiple ${accept ? `accept="${accept}"` : ""} />
-        <div class="form-hint">后端要求补交时至少上传一份文件，否则返回“请至少选择一份补充材料”。</div>
+        <div id="resubMaterialBindings"></div>
+        <div class="form-hint">按审核意见补充材料；材料分类沿用本次申请提交时的要求。</div>
       </div>
       <div class="auth-alert" id="resubErr" hidden></div>
       <div class="form-actions">
@@ -4284,6 +4305,11 @@ async function openResubmit(id, version) {
       </div>
     </div>
   `, "affair-modal");
+  $("#resubFiles").addEventListener("change", () => {
+    window.CampusApplicationMaterials.render($("#resubMaterialBindings"), $("#resubFiles").files, materials);
+    $("#resubErr").hidden = true;
+  });
+  $("#resubMaterialBindings").addEventListener("change", () => { $("#resubErr").hidden = true; });
   $("#resubSubmit").addEventListener("click", async () => {
     const err = $("#resubErr"), btn = $("#resubSubmit");
     const remark = ($("#resubRemark")?.value || "").trim();
@@ -4293,13 +4319,16 @@ async function openResubmit(id, version) {
     if (!files || !files.length) return fail("请至少选择一份补充材料");
     const fileError = validateFiles(files, cfg);
     if (fileError) return fail(fileError);
+    let materialIds;
+    try { materialIds = window.CampusApplicationMaterials.selection($("#resubMaterialBindings"), files, materials, false); }
+    catch (e) { return fail(e.message); }
     err.hidden = true;
     btn.disabled = true;
     btn.textContent = "提交中…";
     const fd = new FormData();
     fd.append("version", String(version));
     fd.append("studentRemark", remark);
-    [...files].forEach(f => fd.append("files", f));
+    window.CampusApplicationMaterials.append(fd, files, materialIds);
     try {
       await apiUpload(`/api/student/applications/${id}/resubmit`, fd);
       closeModal();
@@ -4437,6 +4466,7 @@ async function openReviewDialog(id) {
               <div class="li-ico">▤</div>
               <div class="li-body">
                 <div class="li-title">${escapeHtml(f.filename || "-")}</div>
+                ${f.materialName ? `<div class="li-meta">对应材料：${escapeHtml(f.materialName)}</div>` : ''}
                 <div class="li-meta">${Math.max(1, Math.round((f.fileSize || 0) / 1024))} KB · ${fmtTime(f.uploadedAt)}</div>
               </div>
               <a class="btn btn-sm" href="${API_BASE}/api/admin/files/${f.id}/download" target="_blank" rel="noopener">下载</a>

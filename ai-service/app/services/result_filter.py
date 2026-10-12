@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 
 from app.domain.document import VectorSearchResult
+from app.core.exceptions import RerankError
 
 
 class RerankResultFilter:
@@ -16,6 +17,10 @@ class RerankResultFilter:
         self._relative_threshold = min_relative_score
 
     def select(self, matches: Sequence[VectorSearchResult]) -> list[VectorSearchResult]:
+        if any(match.content.strip() for match in matches) and not any(
+            match.rerank_score is not None for match in matches
+        ):
+            raise RerankError("Evidence cannot be verified without rerank scores")
         eligible = [
             match for match in matches
             if match.rerank_score is not None

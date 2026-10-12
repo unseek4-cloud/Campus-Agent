@@ -6,7 +6,7 @@ _DATE = re.compile(
     r"(?:(?<!\d)(?:19|20)\d{2}[-/.]\d{1,2}[-/.]\d{1,2}"
     r"|(?:(?:19|20)\d{2}\s*年\s*)?\d{1,2}\s*月\s*\d{1,2}\s*日)"
 )
-_TIME_QUERY = re.compile(r"时间|什么时候|何时|哪天|几号|日期")
+_TIME_QUERY = re.compile(r"时间|什么时候|何时|哪天|哪一天|几号|日期|截止|截至|最晚|结束|期限")
 _DEADLINE_QUERY = re.compile(r"截止|截至|最晚|结束|最后期限")
 _DEADLINE_LABEL = re.compile(r"截止|截至|最晚|结束|最后期限")
 _SCHEDULE_LABEL = re.compile(r"时间|日期|日程|安排")
@@ -38,7 +38,7 @@ class TemporalEvidenceService:
             previous = lines[index - 1] if index > 0 else ""
             heading = (
                 previous
-                if len(previous) <= 40 and _SCHEDULE_LABEL.search(previous)
+                if len(previous) <= 40 and (_SCHEDULE_LABEL.search(previous) or _DEADLINE_LABEL.search(previous))
                 else ""
             )
             label = f"{heading} {line[:date.start()]}"[-80:]

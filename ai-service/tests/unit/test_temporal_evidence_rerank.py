@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 from dataclasses import replace
+import pytest
 
 from app.domain.document import VectorSearchResult
 from app.services.evidence_aware_rerank_service import EvidenceAwareRerankService
@@ -76,6 +77,19 @@ def test_explicit_deadline_query_still_prefers_deadline() -> None:
     assert results[0].evidence_score == 1.0
     assert "测评截止时间:2025-09-2000:00" in results[0].evidence_text
     assert results[1].evidence_score == -1.0
+
+
+@pytest.mark.parametrize("query", ["心理测评截止？", "心理测评最晚哪一天？", "心理测评最后期限？"])
+def test_deadline_questions_without_time_word_are_checked(query: str) -> None:
+    results = _service().rerank(query, _candidates(), 2)
+    assert results[0].metadata["page_number"] == 4
+    assert results[0].evidence_score == 1.0
+
+
+def test_deadline_heading_on_previous_line_is_preserved() -> None:
+    evidence = TemporalEvidenceService().assess("报名截至哪一天？", "报名截止\n2026年10月20日")
+    assert evidence.score == 1.0
+    assert evidence.text == "报名截止\n2026年10月20日"
 
 
 def test_unrelated_query_keeps_model_order() -> None:

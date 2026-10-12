@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from app.core.dependencies import get_rag_service
 from app.core.exceptions import LlmConfigurationError, LlmProviderError, LlmTimeoutError
+from app.core.config import Settings
 from app.domain.document import VectorSearchResult
 from app.main import app
 from app.services.context_builder import ContextSource
@@ -60,6 +61,20 @@ def test_rag_api_rejects_blank_question() -> None:
         response = client.post("/internal/v1/rag/chat", json={"query": "   "})
     assert response.status_code == 422
     assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+def test_disabled_rerank_returns_diagnostic_before_loading_models(monkeypatch) -> None:
+    import app.core.dependencies as dependencies
+    dependencies.get_rag_service.cache_clear()
+    monkeypatch.setattr(dependencies, "get_settings", lambda: Settings(rerank_enabled=False))
+    monkeypatch.setattr(dependencies, "get_retrieval_service", lambda: (_ for _ in ()).throw(AssertionError("models must not load")))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            response = client.post("/internal/v1/rag/chat", json={"query": "申请条件？"})
+        assert response.status_code == 503
+        assert response.json()["code"] == "RERANK_UNAVAILABLE"
+    finally:
+        dependencies.get_rag_service.cache_clear()
 
 
 def test_rag_api_maps_provider_errors() -> None:

@@ -118,11 +118,12 @@ public class ChatHistoryRepository {
         return jdbc.query("SELECT id,title,created_at,updated_at FROM ai_conversation WHERE id=?", conversations, id)
                 .stream().findFirst().orElse(null);
     }
-    /** 公开分享读取：调用方必须已用 token 校验过归属，这里不再按 user_id 过滤。ids 为空表示整段会话。 */
-    public List<Message> sharedMessages(long conversationId, List<Long> ids) {
+    /** Old whole-conversation links are bounded by creation time; new links always freeze IDs. */
+    public List<Message> sharedMessages(long conversationId, List<Long> ids, LocalDateTime sharedAt) {
         var all = jdbc.query("SELECT m.* FROM ai_message m WHERE m.conversation_id=? ORDER BY m.created_at ASC,m.id ASC",
                 messageMapper, conversationId);
-        if (ids == null || ids.isEmpty()) return all;
+        // Legacy links have no ID snapshot; timestamp ties cannot establish message ordering.
+        if (ids == null || ids.isEmpty()) return all.stream().filter(m -> m.createdAt().isBefore(sharedAt)).toList();
         var keep = new HashSet<>(ids);
         return all.stream().filter(m -> keep.contains(m.id())).toList();
     }

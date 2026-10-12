@@ -4,6 +4,7 @@ import com.campusagent.affair.application.dto.ApplicationDetail;
 import com.campusagent.affair.application.dto.ApplicationDetail.*;
 import com.campusagent.affair.application.model.*;
 import com.campusagent.affair.application.repository.ApplicationRepository;
+import com.campusagent.affair.application.repository.ApplicationMaterialRepository;
 import com.campusagent.affair.serviceguide.repository.ServiceItemRepository;
 import com.campusagent.identity.user.UserView;
 import com.campusagent.shared.error.BusinessException;
@@ -19,21 +20,28 @@ public class ApplicationService {
     private final ApplicationRepository repository;
     private final ServiceItemRepository items;
     private final ApplicationAttachmentService attachments;
-    public ApplicationService(ApplicationRepository repository, ServiceItemRepository items, ApplicationAttachmentService attachments) {
-        this.repository = repository; this.items = items; this.attachments = attachments;
+    private final ApplicationMaterialRepository materials;
+    public ApplicationService(ApplicationRepository repository, ServiceItemRepository items, ApplicationAttachmentService attachments,
+            ApplicationMaterialRepository materials) {
+        this.repository = repository; this.items = items; this.attachments = attachments; this.materials = materials;
     }
     @Transactional
     public ApplicationDetail create(UserView user, long serviceId, String remark, List<MultipartFile> files) {
+        return create(user, serviceId, remark, files, List.of());
+    }
+    @Transactional
+    public ApplicationDetail create(UserView user, long serviceId, String remark, List<MultipartFile> files, List<String> materialIds) {
         role(user, "STUDENT"); remark = text(remark, true);
         if (user.studentNo() == null || user.studentNo().isBlank()) throw new IllegalArgumentException("账号尚未配置学号，请联系管理员");
         var item = items.lock(serviceId);
         if (item == null || !"ACTIVE".equals(item.status())) throw new BusinessException("SERVICE_NOT_FOUND", "事项不存在或已下架", HttpStatus.NOT_FOUND);
         if (repository.active(user.id(), serviceId) != null) throw duplicate();
-        if (item.materials().stream().anyMatch(m -> m.required()) && files.isEmpty())
-            throw new IllegalArgumentException("请上传所需的申请材料");
+        var requirements = item.materials().stream().map(m -> new MaterialRequirement(m.id(),m.name(),m.description(),m.required())).toList();
+        var bindings = MaterialSubmissionValidator.validate(requirements, files.size(), materialIds, true);
         try {
             long id = repository.insert(serviceId, item.name(), user, remark);
-            attachments.save(id, files);
+            materials.snapshot(id, requirements);
+            attachments.save(id, files, bindings, requirements);
             repository.event(id, null, ApplicationStatus.SUBMITTED, user, remark);
             return detail(id, user);
         } catch (DuplicateKeyException e) { throw duplicate(); }
@@ -48,7 +56,7 @@ public class ApplicationService {
     @Transactional(readOnly=true)
     public ApplicationDetail detail(long id, UserView user) {
         var record = require(id, user, false);
-        return new ApplicationDetail(record, attachments.list(id), repository.events(id));
+        return new ApplicationDetail(record, attachments.list(id), repository.events(id), materials.list(id));
     }
     @Transactional
     public ApplicationDetail review(long id, UserView user, Review review) {
@@ -64,12 +72,18 @@ public class ApplicationService {
     }
     @Transactional
     public ApplicationDetail resubmit(long id, UserView user, int version, String remark, List<MultipartFile> files) {
+        return resubmit(id, user, version, remark, files, List.of());
+    }
+    @Transactional
+    public ApplicationDetail resubmit(long id, UserView user, int version, String remark, List<MultipartFile> files, List<String> materialIds) {
         role(user,"STUDENT");
         var current = require(id,user,true); version(current,version);
         if (current.status() != ApplicationStatus.NEED_MORE) throw conflict("只有待补充材料的申请可以补交");
         if (files.isEmpty()) throw new IllegalArgumentException("请至少选择一份补充材料");
         remark = text(remark,true);
-        attachments.save(id, files);
+        var requirements = materials.list(id);
+        var bindings = MaterialSubmissionValidator.validate(requirements, files.size(), materialIds, false);
+        attachments.save(id, files, bindings, requirements);
         repository.transition(id, ApplicationStatus.SUBMITTED, current.adminRemark(), remark);
         repository.event(id, ApplicationStatus.NEED_MORE, ApplicationStatus.SUBMITTED, user, remark);
         return detail(id,user);

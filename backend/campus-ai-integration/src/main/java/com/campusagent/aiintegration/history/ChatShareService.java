@@ -35,16 +35,19 @@ public class ChatShareService {
         int days = ttlDays == null || ttlDays <= 0 ? DEFAULT_TTL_DAYS : Math.min(ttlDays, MAX_TTL_DAYS);
         var ids = requestedIds == null ? List.<Long>of()
                 : requestedIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
+        if (requestedIds != null && requestedIds.stream().anyMatch(id -> id == null || id <= 0))
+            throw new IllegalArgumentException("请选择有效的分享消息");
         return transaction.execute(s -> {
             var conversation = repository.owned(userId, conversationId, true);
-            if (!ids.isEmpty()) {
-                var owned = repository.messages(userId, conversationId).stream().map(Message::id).collect(java.util.stream.Collectors.toSet());
-                if (!owned.containsAll(ids)) throw new BusinessException("SHARE_MESSAGE_NOT_FOUND", "所选消息不属于该会话", HttpStatus.BAD_REQUEST);
-            }
+            var owned = repository.messages(userId, conversationId).stream().map(Message::id).sorted().toList();
+            if (!owned.containsAll(ids)) throw new BusinessException("SHARE_MESSAGE_NOT_FOUND", "所选消息不属于该会话", HttpStatus.BAD_REQUEST);
+            // Whole-conversation sharing means all messages present now, never future messages.
+            var frozenIds = ids.isEmpty() ? owned : ids;
+            if (frozenIds.isEmpty()) throw new BusinessException("SHARE_EMPTY", "当前对话没有可分享的消息", HttpStatus.BAD_REQUEST);
             var existing = repository.activeShare(userId, conversationId);
-            if (existing != null && existing.messageIds().equals(ids)) return existing;
+            if (existing != null && existing.messageIds().equals(frozenIds)) return existing;
             return repository.createShare(userId, conversationId, token(), conversation.title(),
-                    LocalDateTime.now().plusDays(days), ids);
+                    LocalDateTime.now().plusDays(days), frozenIds);
         });
     }
 
@@ -74,10 +77,10 @@ public class ChatShareService {
             var conversation = repository.conversation(share.conversationId());
             if (conversation == null) throw notFound();
             repository.viewed(share.token());
-            var messages = repository.sharedMessages(share.conversationId(), share.messageIds()).stream()
+            var messages = repository.sharedMessages(share.conversationId(), share.messageIds(), share.createdAt()).stream()
                     .map(m -> new SharedMessage(m.role(), m.content(), m.response(), m.createdAt()))
                     .toList();
-            return new SharedConversation(conversation.title(), share.createdAt(), share.expiresAt(),
+            return new SharedConversation(share.title(), share.createdAt(), share.expiresAt(),
                     share.viewCount() + 1, share.messageIds(), messages);
         });
     }

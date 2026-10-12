@@ -7,6 +7,7 @@ from app.llm.base import LlmProvider
 from app.services.context_builder import ContextBuilder
 from app.services.rag_service import NO_INFORMATION, RagService
 from app.services.result_filter import RerankResultFilter
+from app.core.exceptions import RerankError
 from app.services.retrieval_service import RetrievalRun
 
 
@@ -92,6 +93,14 @@ def test_empty_retrieval_never_calls_llm() -> None:
     assert result.answer == NO_INFORMATION
     assert result.sources == []
     assert result.rerank_count == 0
+
+
+def test_missing_rerank_scores_are_not_reported_as_missing_knowledge() -> None:
+    llm = ScriptedLlm("must not be called")
+    candidate = VectorSearchResult(content="申请条件：在校学生", score=0.95, metadata={})
+    with pytest.raises(RerankError):
+        service([candidate], llm).answer("申请条件？")
+    assert llm.calls == []
     assert llm.calls == []
 
 

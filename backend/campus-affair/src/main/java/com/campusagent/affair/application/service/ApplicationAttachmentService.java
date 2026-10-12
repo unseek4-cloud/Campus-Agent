@@ -1,6 +1,7 @@
 package com.campusagent.affair.application.service;
 
 import com.campusagent.affair.application.dto.ApplicationDetail.Attachment;
+import com.campusagent.affair.application.dto.ApplicationDetail.MaterialRequirement;
 import com.campusagent.affair.application.repository.ApplicationAttachmentRepository;
 import com.campusagent.shared.error.BusinessException;
 import com.campusagent.shared.storage.LocalFileStorage;
@@ -29,13 +30,14 @@ public class ApplicationAttachmentService {
     public Map<String,Object> config() { return Map.of("maxUploadSizeMb", maxBytes/1024/1024,
             "maxFiles", 10, "maxTotalSizeMb", 100, "extensions", List.of("pdf","doc","docx","jpg","jpeg","png")); }
     /** Called inside the application transaction, with its row locked. */
-    public void save(long applicationId, List<MultipartFile> files) {
+    public void save(long applicationId, List<MultipartFile> files, List<String> materialIds, List<MaterialRequirement> materials) {
         if (files.size() > 10 || files.size() + repository.list(applicationId).size() > 50)
             throw new IllegalArgumentException("每次最多上传 10 个文件，每份申请最多 50 个附件");
         if (files.stream().mapToLong(MultipartFile::getSize).sum() > 100L*1024*1024)
             throw new BusinessException("ATTACHMENT_TOO_LARGE", "本次上传总大小不能超过 100 MB", HttpStatus.PAYLOAD_TOO_LARGE);
         try {
-            for (var file : files) {
+            for (int index = 0; index < files.size(); index++) {
+                var file = files.get(index);
                 var valid = ApplicationFileValidator.validate(file, maxBytes);
                 String id = UUID.randomUUID().toString();
                 storage.write(id, valid.bytes());
@@ -45,7 +47,9 @@ public class ApplicationAttachmentService {
                         catch (IOException e) { LoggerFactory.getLogger(getClass()).warn("Application attachment cleanup pending id={}", id); }
                     }
                 });
-                repository.insert(id, applicationId, valid.filename(), valid.contentType(), valid.bytes().length);
+                String materialId = materialIds.get(index);
+                var material = materials.stream().filter(m -> m.id().equals(materialId)).findFirst().orElse(null);
+                repository.insert(id, applicationId, valid.filename(), valid.contentType(), valid.bytes().length, material);
             }
         } catch (IOException e) { throw new BusinessException("UPLOAD_FAILED", "文件保存失败，请稍后重试", HttpStatus.INTERNAL_SERVER_ERROR); }
     }

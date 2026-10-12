@@ -25,7 +25,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties={
     "spring.datasource.url=jdbc:h2:mem:application-test;MODE=MySQL;DB_CLOSE_DELAY=-1;LOCK_TIMEOUT=10000",
     "spring.datasource.driver-class-name=org.h2.Driver", "spring.datasource.username=sa", "spring.datasource.password=",
-    "spring.sql.init.schema-locations=classpath:material-test-schema.sql,classpath:db/migration/V5__auth_rbac.sql,classpath:db/migration/V6__service_application.sql",
+    "spring.sql.init.schema-locations=classpath:material-test-schema.sql,classpath:db/migration/V5__auth_rbac.sql,classpath:db/migration/V6__service_application.sql,classpath:db/migration/V10__application_materials.sql",
     "campus.admin.max-upload-size-mb=1", "campus.auth.jwt-secret=dGVzdC1vbmx5LXJhbmRvbS1zZWNyZXQtbm90LWZvci1wcm9k"
 })
 @AutoConfigureMockMvc
@@ -41,7 +41,7 @@ class ApplicationIntegrationTest {
     Cookie student, other, admin;
     long itemId;
     @BeforeEach void setup() throws Exception {
-        for (String table : List.of("service_application_event","service_application_attachment","service_application","service_step","service_material_attachment","service_item","user_login_session","user_account")) jdbc.update("DELETE FROM " + table);
+        for (String table : List.of("service_application_attachment_material","service_application_material","service_application_event","service_application_attachment","service_application","service_step","service_material_attachment","service_item","user_login_session","user_account")) jdbc.update("DELETE FROM " + table);
         String hash = encoder.encode("test-password");
         for (String username : List.of("20260001","20260002","admin"))
             jdbc.update("INSERT INTO user_account(username,password_hash,display_name,role,student_no) VALUES (?,?,?,?,?)",
@@ -70,6 +70,11 @@ class ApplicationIntegrationTest {
                 .param("userId","999999").param("studentNo","forged").param("role","ADMIN"));
     }
     long create() throws Exception { return data(create(student).andExpect(status().isOk())).path("application").path("id").asLong(); }
+    ResultActions createBound(List<String> materialIds, MockMultipartFile... files) throws Exception {
+        var request=multipart("/api/student/applications"); for (var file:files) request.file(file);
+        return mvc.perform(csrf(request.cookie(student)).param("serviceItemId",Long.toString(itemId))
+                .param("studentRemark","按材料清单提交").param("materialIds",materialIds.toArray(String[]::new)));
+    }
     ResultActions review(long id, String next, int version) throws Exception {
         return mvc.perform(csrf(patch("/api/admin/applications/"+id+"/status").cookie(admin)).contentType("application/json")
                 .content(json.writeValueAsBytes(Map.of("status",next,"remark","审核意见："+next,"version",version))));
@@ -162,9 +167,48 @@ class ApplicationIntegrationTest {
         }
     }
     @Test void requiredMaterialsAndInactiveServiceValidation() throws Exception {
-        jdbc.update("UPDATE service_item SET materials='[{\"name\":\"身份证明\",\"required\":true}]' WHERE id=?",itemId);
-        create(student).andExpect(status().isBadRequest()); create(student,pdf()).andExpect(status().isOk());
+        jdbc.update("UPDATE service_item SET materials='[{\"id\":\"identity\",\"name\":\"身份证明\",\"required\":true}]' WHERE id=?",itemId);
+        create(student).andExpect(status().isBadRequest());
+        create(student,pdf()).andExpect(status().isBadRequest());
+        mvc.perform(csrf(multipart("/api/student/applications").file(pdf()).cookie(student))
+                .param("serviceItemId",Long.toString(itemId)).param("studentRemark","办理说明").param("materialIds","identity"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.attachments[0].materialId").value("identity"));
         jdbc.update("UPDATE service_item SET status='DISABLED' WHERE id=?",itemId); create(other,pdf()).andExpect(status().isNotFound());
+    }
+
+    @Test void everyRequiredMaterialMustHaveAnOwnedBindingBeforeAnythingIsSaved() throws Exception {
+        jdbc.update("UPDATE service_item SET materials=? WHERE id=?",
+                "[{\"id\":\"identity\",\"name\":\"身份证明\",\"required\":true},{\"id\":\"form\",\"name\":\"申请表\",\"required\":true}]",itemId);
+        createBound(List.of("identity"),pdf()).andExpect(status().isBadRequest());
+        createBound(List.of("identity","identity"),pdf(),pdf()).andExpect(status().isBadRequest());
+        createBound(List.of("identity","foreign"),pdf(),pdf()).andExpect(status().isBadRequest());
+        createBound(List.of("identity","form"),pdf()).andExpect(status().isBadRequest());
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM service_application",Integer.class));
+        try(var files=Files.list(storage)) { assertEquals(0,files.count()); }
+        var saved=data(createBound(List.of("identity","form"),pdf(),pdf()).andExpect(status().isOk()));
+        assertEquals(2,saved.path("materials").size());
+        var names=new HashSet<String>();
+        for(var file:saved.path("attachments")) names.add(file.path("materialName").asText());
+        assertEquals(Set.of("身份证明","申请表"),names);
+        assertEquals(2,jdbc.queryForObject("SELECT COUNT(*) FROM service_application_attachment_material",Integer.class));
+    }
+
+    @Test void resubmissionUsesSubmissionSnapshotAfterServiceMaterialsChange() throws Exception {
+        jdbc.update("UPDATE service_item SET materials=? WHERE id=?",
+                "[{\"id\":\"identity\",\"name\":\"原身份证明\",\"required\":true}]",itemId);
+        long id=data(createBound(List.of("identity"),pdf()).andExpect(status().isOk())).path("application").path("id").asLong();
+        review(id,"REVIEWING",0); review(id,"NEED_MORE",1);
+        jdbc.update("UPDATE service_item SET materials=? WHERE id=?",
+                "[{\"id\":\"new-form\",\"name\":\"新申请表\",\"required\":true}]",itemId);
+        mvc.perform(csrf(multipart("/api/student/applications/"+id+"/resubmit").file(pdf()).cookie(student))
+                .param("version","2").param("studentRemark","补交").param("materialIds","new-form"))
+                .andExpect(status().isBadRequest());
+        var saved=data(mvc.perform(csrf(multipart("/api/student/applications/"+id+"/resubmit").file(pdf()).cookie(student))
+                .param("version","2").param("studentRemark","补交原身份证明").param("materialIds","identity"))
+                .andExpect(status().isOk()));
+        assertEquals("原身份证明",saved.path("materials").get(0).path("name").asText());
+        assertEquals(2,saved.path("attachments").size());
+        for(var file:saved.path("attachments")) assertEquals("原身份证明",file.path("materialName").asText());
     }
     @Test void missingParametersAndUnknownFilterAre400() throws Exception {
         mvc.perform(csrf(multipart("/api/student/applications").cookie(student))).andExpect(status().isBadRequest());

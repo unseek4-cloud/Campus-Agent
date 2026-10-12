@@ -4,6 +4,7 @@ from threading import Semaphore
 import os
 
 from app.core.config import get_settings
+from app.core.exceptions import RerankError
 from app.conversation.query_rewriter import QueryRewriter
 from app.llm.llm_factory import create_llm_provider
 from app.infrastructure.docx.docx_extractor import DocxDocumentExtractor
@@ -166,6 +167,8 @@ def get_retrieval_service() -> RetrievalService:
 @lru_cache
 def get_rag_service() -> RagService:
     settings = get_settings()
+    if not settings.rerank_enabled:
+        raise RerankError("RAG requires reranking; enable AI_RERANK_ENABLED and prepare the rerank model")
     llm = create_llm_provider(settings)
     return RagService(
         retrieval=get_retrieval_service(),
