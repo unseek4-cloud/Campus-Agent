@@ -212,7 +212,17 @@ try {
   admin.state.messages = state.messages;
   await admin.page.evaluate(() => openConversation(10));
   await admin.page.locator('.service-guide').waitFor();
-  check(await admin.page.locator('[data-guide-action="complete"]').count() === 0, 'admin gets preview without student tracking');
+  check(await admin.page.locator('[data-guide-action="complete"]').count() > 0, 'admin gets interactive guide progress');
+  check(await admin.page.locator('.service-guide [data-guide-action="apply"]').count() === 0, 'admin guide retains administrator permissions');
+  await admin.page.locator('[data-guide-action="complete"]').first().click();
+  check(await admin.page.locator('.service-guide [role="progressbar"]').first().getAttribute('aria-valuenow') === '25', 'admin can complete an individual guide step');
+  await admin.page.locator('.service-guide .guide-flow').first().evaluate(details => details.open = true);
+  check(await admin.page.locator('.service-guide .guide-step.is-done').count() > 0, 'completed admin steps have a visible state');
+  await admin.page.screenshot({ path: fileURLToPath(new URL('admin-guide-progress.png', output)) });
+  await admin.page.reload();
+  await admin.page.evaluate(() => openConversation(10));
+  await admin.page.locator('.service-guide').waitFor();
+  check(await admin.page.locator('.service-guide [role="progressbar"]').first().getAttribute('aria-valuenow') === '25', 'admin guide progress survives reload');
   check(admin.errors.length === 0, 'no admin runtime errors');
   await admin.context.close();
   const guest = await fixture({ loggedIn: false });

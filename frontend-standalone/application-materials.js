@@ -1,42 +1,87 @@
-/* Each uploaded attachment has an explicit material category; the server validates coverage. */
+/* Uploads are grouped by requirement and bound to that material automatically. */
 (() => {
-  function render(container, files, materials) {
+  const pickers = new WeakMap();
+  function render(container, materials, { accept = '' } = {}) {
     container.replaceChildren();
-    if (!files.length) return;
-    const hint = document.createElement('p');
-    hint.className = 'form-hint';
-    hint.textContent = '为每份文件选择对应材料；上传完成后仍需管理员核验内容。';
-    container.append(hint);
-    [...files].forEach((file, index) => {
-      const row = document.createElement('div');
-      row.className = 'form-row';
+    const groups = [...materials.map(material => ({ ...material, files: [] })),
+      { id: '', name: '其他附件 / 补充说明', required: false, files: [] }];
+    pickers.set(container, groups);
+    groups.forEach((group, index) => {
+      const card = document.createElement('div');
+      card.className = 'application-material-upload';
+      const heading = document.createElement('div');
+      heading.className = 'material-upload-heading';
       const label = document.createElement('label');
-      label.htmlFor = `${container.id}-material-${index}`;
-      label.textContent = file.name;
-      const select = document.createElement('select');
-      select.id = label.htmlFor;
-      select.className = 'input';
-      select.dataset.materialBinding = String(index);
-      select.setAttribute('aria-label', `${file.name}对应材料`);
-      select.append(new Option('其他附件 / 补充说明', ''));
-      for (const material of materials) {
-        select.append(new Option(`${material.required ? '必交' : '选交'} · ${material.name}`, material.id));
+      label.htmlFor = `${container.id}-upload-${index}`;
+      label.textContent = `${group.required ? '必交 · ' : '选交 · '}${group.name}`;
+      const status = document.createElement('span');
+      status.className = 'material-upload-status';
+      heading.append(label, status);
+      card.append(heading);
+      if (group.description) {
+        const description = document.createElement('p');
+        description.className = 'form-hint';
+        description.textContent = group.description;
+        card.append(description);
       }
-      if (materials.length === 1) select.value = materials[0].id;
-      row.append(label, select);
-      container.append(row);
+      const input = document.createElement('input');
+      input.id = label.htmlFor;
+      input.type = 'file';
+      input.multiple = true;
+      input.accept = accept;
+      input.className = 'input';
+      input.dataset.materialUpload = group.id;
+      input.setAttribute('aria-label', `上传${group.name}`);
+      const list = document.createElement('div');
+      list.className = 'material-upload-files';
+      function paint() {
+        status.textContent = group.files.length ? `已选择 ${group.files.length} 份` : group.required ? '待上传' : '可选';
+        status.classList.toggle('is-ready', group.files.length > 0);
+        list.replaceChildren();
+        group.files.forEach((file, fileIndex) => {
+          const row = document.createElement('div');
+          row.className = 'material-upload-file';
+          const name = document.createElement('span');
+          name.textContent = `${file.name} · ${Math.ceil(file.size / 1024)} KB`;
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'btn btn-sm';
+          remove.textContent = '移除';
+          remove.setAttribute('aria-label', `移除${file.name}`);
+          remove.addEventListener('click', () => {
+            group.files.splice(fileIndex, 1);
+            input.value = '';
+            paint();
+            container.dispatchEvent(new Event('change', { bubbles: true }));
+          });
+          row.append(name, remove);
+          list.append(row);
+        });
+      }
+      input.addEventListener('change', () => {
+        group.files.push(...input.files);
+        input.value = '';
+        paint();
+      });
+      const picker = document.createElement('label');
+      picker.className = 'btn btn-sm material-upload-picker';
+      const caption = document.createElement('span');
+      caption.textContent = '选择文件';
+      picker.append(caption, input);
+      card.append(picker, list);
+      container.append(card);
+      paint();
     });
   }
-  function selection(container, files, materials, requireAll) {
-    const ids = [...container.querySelectorAll('[data-material-binding]')].map(select => select.value);
-    if (ids.length !== files.length) throw new Error('文件选择已变化，请重新选择文件。');
-    const allowed = new Set(materials.map(material => material.id));
-    if (ids.some(id => id && !allowed.has(id))) throw new Error('附件对应材料已变化，请重新选择。');
+  function selection(container, requireAll) {
+    const groups = pickers.get(container);
+    if (!groups) throw new Error('材料要求尚未加载，请重新打开申请表单。');
     if (requireAll) {
-      const missing = materials.filter(material => material.required && !ids.includes(material.id));
-      if (missing.length) throw new Error(`请逐项上传必交材料：${missing.map(material => material.name).join('、')}`);
+      const missing = groups.filter(group => group.required && !group.files.length);
+      if (missing.length) throw new Error(`请逐项上传必交材料：${missing.map(group => group.name).join('、')}`);
     }
-    return ids;
+    return { files: groups.flatMap(group => group.files),
+      ids: groups.flatMap(group => group.files.map(() => group.id)) };
   }
   function append(form, files, ids) {
     [...files].forEach((file, index) => {
@@ -44,5 +89,8 @@
       form.append('materialIds', ids[index]);
     });
   }
-  window.CampusApplicationMaterials = { render, selection, append };
+  function disable(container, disabled) {
+    container.querySelectorAll('input, button').forEach(control => control.disabled = disabled);
+  }
+  window.CampusApplicationMaterials = { render, selection, append, disable };
 })();

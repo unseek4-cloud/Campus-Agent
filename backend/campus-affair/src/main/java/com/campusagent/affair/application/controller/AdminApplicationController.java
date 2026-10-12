@@ -23,4 +23,8 @@ public class AdminApplicationController {
             @RequestBody ApplicationDetail.Review review, @AuthenticationPrincipal UserPrincipal user) {
         return ApiResponse.success(service.review(id,user.user(),review));
     }
+    @PatchMapping("/{id}/review") public ApiResponse<ApplicationDetail> reviewFlow(@PathVariable long id,
+            @RequestBody ApplicationDetail.Review review, @AuthenticationPrincipal UserPrincipal user) {
+        return ApiResponse.success(service.reviewFlow(id,user.user(),review));
+    }
 }

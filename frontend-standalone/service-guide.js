@@ -84,7 +84,7 @@
       ${hasSource ? `<div class="guide-source">依据：${esc(source?.title || s.sourceTitle || '学校文件')}${source?.publishTime || s.sourcePublishTime ? ' · ' + esc(source?.publishTime || s.sourcePublishTime) : ''}
         ${policy ? `<a class="link-btn" href="${esc(policy)}" target="_blank" rel="noopener">查看原文 ↗</a>` : ''}
         ${!readOnly && (source?.documentId || s.sourceDocumentId) && s.id && s.status === 'ACTIVE' ? `<a class="link-btn" href="${api}/api/services/${s.id}/source" target="_blank" rel="noopener">下载来源文件</a>` : ''}</div>` : ''}
-      ${!readOnly ? `<footer class="guide-footer">${track && s.id && s.status === 'ACTIVE' ? `<button class="btn btn-sm btn-primary" data-guide-action="apply">立即办理</button>` : ''}<button class="btn btn-sm" data-guide-action="detail">查看事项详情</button></footer>` : ''}`;
+      ${!readOnly ? `<footer class="guide-footer">${track && !admin && s.id && s.status === 'ACTIVE' ? `<button class="btn btn-sm btn-primary" data-guide-action="apply">立即办理</button>` : ''}<button class="btn btn-sm" data-guide-action="detail">查看事项详情</button></footer>` : ''}`;
   }
   function paint(node, context) {
     const opened = ['.guide-details', '.guide-flow'].filter(selector => node.querySelector(selector)?.open);
@@ -96,7 +96,7 @@
       if (contexts.has(node)) return;
       const raw = JSON.parse(node.dataset.guide);
       const s = { ...raw.service, version: raw.service.version ?? 0, materials: raw.service.materials || [] };
-      const context = { ...raw, service: s, steps: orderSteps(raw.steps || []), track: !raw.readOnly && owner != null && !admin && !!s.code };
+      const context = { ...raw, service: s, steps: orderSteps(raw.steps || []), track: !raw.readOnly && owner != null && !!s.code };
       if (context.track) store.getProgress(s, context.steps);
       contexts.set(node, context);
       paint(node, context);

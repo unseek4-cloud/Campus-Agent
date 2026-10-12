@@ -116,6 +116,63 @@ class ApplicationIntegrationTest {
         mvc.perform(multipart("/api/student/applications").cookie(student).param("serviceItemId","1").param("studentRemark","x")).andExpect(status().isForbidden());
     }
     @Test void submittedToReviewing() throws Exception { review(create(),"REVIEWING",0).andExpect(status().isOk()).andExpect(jsonPath("$.data.application.status").value("REVIEWING")); }
+    ResultActions reviewFlow(long id, String next, String remark, int version, Cookie actor) throws Exception {
+        return mvc.perform(csrf(patch("/api/admin/applications/"+id+"/review").cookie(actor)).contentType("application/json")
+                .content(json.writeValueAsBytes(Map.of("status",next,"remark",remark,"version",version))));
+    }
+    @Test void oneReviewCompletesAllStagesAndStoresOpinionOnce() throws Exception {
+        long id=create();
+        var detail=data(reviewFlow(id,"COMPLETED","材料齐全，已办理完成",0,admin).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.application.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.application.version").value(3))
+                .andExpect(jsonPath("$.data.application.completedAt").isNotEmpty()));
+        assertEquals("材料齐全，已办理完成",detail.path("application").path("adminRemark").asText());
+        var events=detail.path("events");
+        assertEquals(4,events.size());
+        assertEquals("REVIEWING",events.get(1).path("toStatus").asText());
+        assertEquals("APPROVED",events.get(2).path("toStatus").asText());
+        assertEquals("COMPLETED",events.get(3).path("toStatus").asText());
+        assertEquals("",events.get(1).path("remark").asText());
+        assertEquals("",events.get(2).path("remark").asText());
+        assertEquals("材料齐全，已办理完成",events.get(3).path("remark").asText());
+        reviewFlow(id,"COMPLETED","重复提交",0,admin).andExpect(status().isConflict());
+        assertEquals(4,jdbc.queryForObject("SELECT COUNT(*) FROM service_application_event WHERE application_id=?",Integer.class,id));
+        create(student).andExpect(status().isOk());
+    }
+    @Test void oneReviewCanStopAtApprovalAndCompleteLater() throws Exception {
+        long id=create();
+        reviewFlow(id,"APPROVED","审核通过，等待办理",0,admin).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.application.status").value("APPROVED"))
+                .andExpect(jsonPath("$.data.application.completedAt").isEmpty());
+        create(student).andExpect(status().isConflict());
+        reviewFlow(id,"COMPLETED","已办理",2,admin).andExpect(status().isOk());
+    }
+    @Test void oneReviewSupportsSupplementAndRejectionButRequiresReasonBeforeAnyWrite() throws Exception {
+        long id=create();
+        reviewFlow(id,"NEED_MORE"," ",0,admin).andExpect(status().isBadRequest());
+        reviewFlow(id,"REJECTED","",0,admin).andExpect(status().isBadRequest());
+        assertEquals("SUBMITTED",jdbc.queryForObject("SELECT status FROM service_application WHERE id=?",String.class,id));
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM service_application_event WHERE application_id=?",Integer.class,id));
+        reviewFlow(id,"NEED_MORE","请补充身份证明",0,admin).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.application.status").value("NEED_MORE"))
+                .andExpect(jsonPath("$.data.events.length()").value(3));
+        reviewFlow(id,"COMPLETED","无效跳转",2,admin).andExpect(status().isConflict());
+        mvc.perform(csrf(multipart("/api/student/applications/"+id+"/resubmit").file(pdf()).cookie(student))
+                .param("version","2").param("studentRemark","已补充")).andExpect(status().isOk());
+        reviewFlow(id,"REJECTED","不符合办理条件",3,admin).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.application.status").value("REJECTED"));
+    }
+    @Test void reviewFlowStillEnforcesPermissionsCsrfAndVersion() throws Exception {
+        long id=create();
+        reviewFlow(id,"COMPLETED","伪造",0,student).andExpect(status().isForbidden());
+        mvc.perform(patch("/api/admin/applications/"+id+"/review").cookie(admin).contentType("application/json")
+                .content("{\"status\":\"COMPLETED\",\"version\":0}")).andExpect(status().isForbidden());
+        reviewFlow(id,"COMPLETED","旧版本",1,admin).andExpect(status().isConflict());
+        reviewFlow(id,"SUBMITTED","无效结果",0,admin).andExpect(status().isConflict());
+        assertEquals(0,jdbc.queryForObject("SELECT version FROM service_application WHERE id=?",Integer.class,id));
+        review(id,"REVIEWING",0).andExpect(status().isOk());
+        reviewFlow(id,"COMPLETED","审核中申请连续办结",1,admin).andExpect(status().isOk());
+    }
     @Test void reviewingToNeedMoreAndAtomicResubmissionPreservesHistory() throws Exception {
         long id=create(); review(id,"REVIEWING",0).andExpect(status().isOk()); review(id,"NEED_MORE",1).andExpect(status().isOk());
         var result=mvc.perform(csrf(multipart("/api/student/applications/"+id+"/resubmit").file(pdf()).cookie(student)).param("version","2").param("studentRemark","已补充身份证明"))

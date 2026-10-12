@@ -1,5 +1,25 @@
 # CampusAgent 在线申请与审核交付说明
 
+## 2026-10-12 交互修复
+
+- 静态版管理员智能问答与学生端一样提供当前步骤、完成状态、进度、回退及重置；进度按登录账号保存在当前浏览器。事项管理预览和公开分享仍保持原有用途。
+- 静态版及 Vue 版为每项材料提供独立上传入口，自动关联材料 ID，显示所选文件并支持移除；必交项未上传时显示缺失项名称。补交沿用申请的材料快照，允许只上传本次需补充的材料。
+- 审核在同一窗口连续确认各阶段，意见只填写一次；可以在审核中、已通过、待补材料、驳回或已完成阶段点击「提交审核结果」。提交前的步骤调整不写入数据库。
+- 静态版事项编辑器为步骤标题、负责部门、预计耗时、地点、说明和材料添加常驻标签及步骤编号，填写后仍可辨识字段。已验证新增/删除时内容保留和手机端布局；Vue 版原有常驻标签保持一致。
+- 新增 `PATCH /api/admin/applications/{id}/review`，请求仍为 `{status, remark, version}`。服务端在申请行锁和同一事务内，沿合法状态路径记录每次流转，意见只保存到最终流转及申请记录。支持已提交或审核中申请一次办结，也支持先审核通过、以后再办结。要求补材料和驳回必须填写原因；旧版本返回 409。原 `/status` 单步接口保留。
+- 本次无需新增数据库迁移。后端需使用新打包的 JAR 重启；静态页刷新即可加载修改，Vue 版使用更新后的构建。
+
+验证：申请后端集成测试 25 项、前端单元测试 32 项、静态材料浏览器检查 21 项、连续审核检查 19 项、问答回归检查 58 项、Vue 申请交互检查 11 项均通过，Vue 生产构建通过。浏览器验证加载实际前端代码并模拟 API；后端测试使用临时 H2 数据库，没有操作真实申请数据。
+
+新增或更新的浏览器测试可从仓库根目录执行（复用本机 Playwright Core / Edge）：
+
+```powershell
+node frontend-standalone/tests/application-materials.e2e.mjs
+node frontend-standalone/tests/application-review.e2e.mjs
+node frontend-standalone/tests/chat-workspace.e2e.mjs
+node frontend/tests/browser/applicationInteractions.e2e.mjs
+```
+
 开发分支：`feature/service-application`。2026-09-27 用户验收通过，授权关闭服务、提交本次功能并合并到 `main`；未授权推送，因此不推送远端。
 
 验收后已停止前端、后端和 AI Service，并确认 5173、8080、8000 均无监听；MySQL80 保持运行。关闭记录：`tmp/application-shutdown.json`。

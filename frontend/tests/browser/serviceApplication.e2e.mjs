@@ -47,11 +47,11 @@ async function studentDetail() {
   await page.locator('.el-table__row').filter({ hasText: item.name }).first().getByRole('button', { name: '查看详情' }).click()
   await page.waitForURL(base + `/student/applications/${applicationId}`)
 }
-async function review(button, opinion, expected, confirm = false) {
+async function review(button, opinion, expected) {
   await page.getByRole('textbox', { name: '管理员意见', exact: true }).fill(opinion)
-  const response = page.waitForResponse(r => r.url().endsWith(`/applications/${applicationId}/status`) && r.request().method() === 'PATCH')
   await page.getByRole('button', { name: button, exact: true }).click()
-  if (confirm) await page.locator('.el-message-box').getByRole('button', { name: '确认', exact: true }).click()
+  const response = page.waitForResponse(r => r.url().endsWith(`/applications/${applicationId}/review`) && r.request().method() === 'PATCH')
+  await page.getByRole('button', { name: '提交审核结果', exact: true }).click()
   assert.equal((await response).status(), 200); await assertState(expected)
 }
 try {
@@ -74,10 +74,13 @@ try {
   await page.waitForURL(base + `/student/services/${item.id}/apply`)
   await page.getByRole('textbox', { name: '申请说明', exact: true }).fill(marker + ' 学生证遗失，请办理补办。')
   const fixture = { name: '身份证明.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\nCampusAgent temporary application evidence') }
-  await page.locator('input[type=file]').setInputFiles(fixture)
+  const required = item.materials.filter(material => material.required)
+  const firstUpload = required.length ? page.getByLabel(`上传${required[0].name}`, { exact: true }) : page.locator('input[type=file]').first()
+  await firstUpload.setInputFiles(fixture)
   await page.getByText('已选择 ·', { exact: false }).waitFor()
   await page.getByRole('button', { name: '移除', exact: true }).click()
-  await page.locator('input[type=file]').setInputFiles(fixture)
+  await firstUpload.setInputFiles(fixture)
+  for (const material of required.slice(1)) await page.getByLabel(`上传${material.name}`, { exact: true }).setInputFiles(fixture)
   const creation = page.waitForResponse(r => r.url().endsWith('/api/student/applications') && r.request().method() === 'POST')
   await page.getByRole('button', { name: '提交申请', exact: true }).click()
   const created = await creation; assert.equal(created.status(), 200)
@@ -85,7 +88,7 @@ try {
   await assertState('已提交'); assert.match(detail.application.applicationNo, /^CA\d{16,}$/)
   await page.reload(); await assertState('已提交')
   const pendingDownload = page.waitForEvent('download')
-  await page.getByRole('button', { name: '下载', exact: true }).click()
+  await page.getByRole('button', { name: '下载', exact: true }).first().click()
   const downloaded = await pendingDownload
   assert.equal(downloaded.suggestedFilename(), fixture.name)
   assert.deepEqual(await readFile(await downloaded.path()), fixture.buffer)
@@ -102,7 +105,7 @@ try {
   await logout(); await login('STUDENT'); await studentDetail(); await assertState('待补充材料')
   await page.locator('.admin-remark').getByText('请补充身份证明。', { exact: true }).waitFor()
   await page.getByRole('textbox', { name: '补充说明', exact: true }).fill(marker + ' 已补充身份证明。')
-  await page.locator('input[type=file]').setInputFiles({ ...fixture, name: '补充身份证明.pdf' })
+  await page.locator('input[type=file]').first().setInputFiles({ ...fixture, name: '补充身份证明.pdf' })
   await page.getByRole('button', { name: '重新提交', exact: true }).click(); await assertState('已提交')
   await logout(); await login('ADMIN'); await adminDetail()
   await review('开始审核', '补充材料已收到。', '审核中')
@@ -110,7 +113,7 @@ try {
   await page.screenshot({ path: path.join(output, 'admin-approved.png'), fullPage: true })
   await logout(); await login('STUDENT'); await studentDetail(); await assertState('已通过')
   await logout(); await login('ADMIN'); await adminDetail()
-  await review('标记办结', '学生证补办完成。', '已办结', true)
+  await review('标记办结', '学生证补办完成。', '已办结')
   await logout(); await login('STUDENT'); await studentDetail(); await assertState('已办结')
   assert.equal(await page.locator('input[type=file]').count(), 0)
   assert.equal(await page.locator('.application-timeline .el-timeline-item').count(), 7)

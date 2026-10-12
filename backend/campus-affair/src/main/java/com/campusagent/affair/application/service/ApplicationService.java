@@ -71,6 +71,37 @@ public class ApplicationService {
         return detail(id,user);
     }
     @Transactional
+    public ApplicationDetail reviewFlow(long id, UserView user, Review review) {
+        role(user,"ADMIN");
+        var current = require(id,user,true);
+        if (review == null || review.status() == null) throw new IllegalArgumentException("请选择审核结果");
+        version(current, review.version());
+        String remark = text(review.remark(), review.status() == ApplicationStatus.NEED_MORE || review.status() == ApplicationStatus.REJECTED);
+        // Build and validate the whole path before writing. The lock and transaction keep one
+        // review atomic while preserving every legal transition in the application history.
+        var path = new ArrayList<ApplicationStatus>();
+        var from = current.status();
+        while (from != review.status()) {
+            var next = from.canReviewTo(review.status()) ? review.status() : switch (from) {
+                case SUBMITTED -> ApplicationStatus.REVIEWING;
+                case REVIEWING -> review.status() == ApplicationStatus.COMPLETED ? ApplicationStatus.APPROVED : null;
+                default -> null;
+            };
+            if (next == null || !from.canReviewTo(next)) throw conflict("当前状态不允许此审核结果，请刷新申请");
+            path.add(next);
+            from = next;
+        }
+        if (path.isEmpty()) throw conflict("请选择新的审核结果");
+        from = current.status();
+        for (var next : path) {
+            String stepRemark = next == review.status() ? remark : "";
+            repository.transition(id, next, stepRemark, current.studentRemark());
+            repository.event(id, from, next, user, stepRemark);
+            from = next;
+        }
+        return detail(id,user);
+    }
+    @Transactional
     public ApplicationDetail resubmit(long id, UserView user, int version, String remark, List<MultipartFile> files) {
         return resubmit(id, user, version, remark, files, List.of());
     }

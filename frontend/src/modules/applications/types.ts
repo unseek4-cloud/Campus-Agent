@@ -8,9 +8,11 @@ export interface ApplicationRecord {
   studentRemark: string; adminRemark: string | null; version: number
   submittedAt: string; updatedAt: string; completedAt: string | null
 }
-export interface ApplicationAttachment { id: string; filename: string; contentType: string; fileSize: number; uploadedAt: string }
+export interface MaterialRequirement { id: string; name: string; description: string | null; required: boolean }
+export interface SelectedAttachment { file: File; materialId: string }
+export interface ApplicationAttachment { id: string; filename: string; contentType: string; fileSize: number; uploadedAt: string; materialId?: string; materialName?: string }
 export interface ApplicationEvent { id: number; fromStatus: ApplicationStatus | null; toStatus: ApplicationStatus; actorName: string; actorRole: string; remark: string; createdAt: string }
-export interface ApplicationDetail { application: ApplicationRecord; attachments: ApplicationAttachment[]; events: ApplicationEvent[] }
+export interface ApplicationDetail { application: ApplicationRecord; attachments: ApplicationAttachment[]; events: ApplicationEvent[]; materials: MaterialRequirement[] }
 export interface ApplicationPage { items: ApplicationRecord[]; total: number; page: number; pageSize: number }
 export interface UploadConfig { maxUploadSizeMb: number; maxTotalSizeMb: number; maxFiles: number; extensions: string[] }
 export function dateText(value: string | null) { return value ? value.replace('T', ' ').slice(0, 19) : '—' }

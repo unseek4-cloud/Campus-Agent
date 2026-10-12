@@ -4150,7 +4150,6 @@ async function openNewApplication(serviceId) {
   try {
     const [services, cfg] = await Promise.all([apiGet("/api/services"), loadUploadConfig()]);
     appServiceCache = (services || []).filter(s => s.status === "ACTIVE");
-    const accept = cfg ? cfg.extensions.map(e => "." + e).join(",") : "";
     const limit = cfg ? `≤${cfg.maxFiles} 个文件 · 单个 ≤${cfg.maxUploadSizeMb}MB · 合计 ≤${cfg.maxTotalSizeMb}MB · ${cfg.extensions.join(" / ")}` : "";
     openModal(`
       <div class="detail-head">
@@ -4173,8 +4172,7 @@ async function openNewApplication(serviceId) {
             <textarea id="appRemark" class="input" rows="4" maxlength="4000" placeholder="请说明申请原因与具体情况（最多 4000 字，后端必填）"></textarea>
           </div>
           <div class="form-row">
-            <label for="appFiles">申请材料 ${limit ? `<span class="label-note">${limit}</span>` : ""}</label>
-            <input type="file" id="appFiles" class="input" multiple ${accept ? `accept="${accept}"` : ""} />
+            <label>申请材料 ${limit ? `<span class="label-note">${limit}</span>` : ""}</label>
             <div id="appMaterialBindings"></div>
             <div class="form-hint" id="appReqHint"></div>
           </div>
@@ -4188,11 +4186,6 @@ async function openNewApplication(serviceId) {
     if (appServiceCache.length) {
       $("#appService").addEventListener("change", refreshServiceBrief);
       $("#appSubmit").addEventListener("click", submitNewApplication);
-      $("#appFiles").addEventListener("change", () => {
-        const item = appServiceCache.find(s => s.id === Number($("#appService").value));
-        window.CampusApplicationMaterials.render($("#appMaterialBindings"), $("#appFiles").files, item?.materials || []);
-        $("#appErr").hidden = true;
-      });
       $("#appMaterialBindings").addEventListener("change", () => { $("#appErr").hidden = true; });
       refreshServiceBrief();
     }
@@ -4209,8 +4202,8 @@ async function refreshServiceBrief() {
   const s = appServiceCache.find(x => x.id === id);
   const materials = s?.materials || [];
   const required = materials.filter(m => m.required);
-  $("#appFiles").value = '';
-  window.CampusApplicationMaterials.render($("#appMaterialBindings"), [], materials);
+  window.CampusApplicationMaterials.render($("#appMaterialBindings"), materials,
+    { accept: uploadConfig?.extensions.map(e => '.' + e).join(',') || '' });
   $("#appErr").hidden = true;
   box.innerHTML = !s ? "" : `
     <div class="service-brief">
@@ -4224,7 +4217,7 @@ async function refreshServiceBrief() {
       <div id="appActiveHint"></div>
     </div>`;
   hint.innerHTML = required.length
-    ? `请逐项上传并选择对应材料：${required.map(m => escapeHtml(m.name)).join("、")}。材料内容以管理员审核为准。`
+    ? `请在各材料的独立入口逐项上传：${required.map(m => escapeHtml(m.name)).join("、")}。文件将自动归入对应材料，提交后由管理员审核。`
     : "该事项没有必交材料，可只填写说明直接提交。";
   try {
     const active = await apiGet(`/api/student/applications/active?serviceItemId=${id}`);
@@ -4238,23 +4231,23 @@ async function refreshServiceBrief() {
 async function submitNewApplication() {
   const sel = $("#appService"), err = $("#appErr"), btn = $("#appSubmit");
   const remark = ($("#appRemark")?.value || "").trim();
-  const files = [...($("#appFiles")?.files || [])];
-  const fail = (m) => { err.hidden = false; err.textContent = m; btn.disabled = false; btn.textContent = '提交申请'; };
+  const picker = $("#appMaterialBindings");
+  const fail = (m) => { err.hidden = false; err.textContent = m; btn.disabled = false; btn.textContent = '提交申请';
+    window.CampusApplicationMaterials.disable(picker, false); sel.disabled = false; $("#appRemark").disabled = false; };
   if (!sel || !btn || btn.disabled) return;
   btn.disabled = true;
   if (!remark) return fail("请填写申请说明（后端必填）");
   if (remark.length > 4000) return fail("申请说明不能超过 4000 字");
-  const cfg = await loadUploadConfig();
-  const fileError = validateFiles(files || [], cfg);
-  if (fileError) return fail(fileError);
-  const materials = appServiceCache.find(s => s.id === Number(sel.value))?.materials || [];
-  let materialIds;
-  try { materialIds = window.CampusApplicationMaterials.selection($("#appMaterialBindings"), files, materials, true); }
+  let files, materialIds;
+  try { ({ files, ids: materialIds } = window.CampusApplicationMaterials.selection(picker, true)); }
   catch (e) { return fail(e.message); }
+  const fileError = validateFiles(files, uploadConfig);
+  if (fileError) return fail(fileError);
 
   err.hidden = true;
   btn.disabled = true;
   btn.textContent = "提交中…";
+  window.CampusApplicationMaterials.disable(picker, true); sel.disabled = true; $("#appRemark").disabled = true;
   const fd = new FormData();
   fd.append("serviceItemId", sel.value);
   fd.append("studentRemark", remark);
@@ -4293,8 +4286,7 @@ async function openResubmit(id, version) {
         <textarea id="resubRemark" class="input" rows="3" maxlength="4000" placeholder="说明本次补充的内容（后端必填）"></textarea>
       </div>
       <div class="form-row">
-        <label for="resubFiles">补充材料 * <span class="label-note">${cfg ? `≤${cfg.maxFiles} 个 · 单个 ≤${cfg.maxUploadSizeMb}MB · ${cfg.extensions.join(" / ")}` : ""}</span></label>
-        <input type="file" id="resubFiles" class="input" multiple ${accept ? `accept="${accept}"` : ""} />
+        <label>补充材料 * <span class="label-note">${cfg ? `≤${cfg.maxFiles} 个 · 单个 ≤${cfg.maxUploadSizeMb}MB · ${cfg.extensions.join(" / ")}` : ""}</span></label>
         <div id="resubMaterialBindings"></div>
         <div class="form-hint">按审核意见补充材料；材料分类沿用本次申请提交时的要求。</div>
       </div>
@@ -4305,26 +4297,25 @@ async function openResubmit(id, version) {
       </div>
     </div>
   `, "affair-modal");
-  $("#resubFiles").addEventListener("change", () => {
-    window.CampusApplicationMaterials.render($("#resubMaterialBindings"), $("#resubFiles").files, materials);
-    $("#resubErr").hidden = true;
-  });
+  window.CampusApplicationMaterials.render($("#resubMaterialBindings"), materials, { accept });
   $("#resubMaterialBindings").addEventListener("change", () => { $("#resubErr").hidden = true; });
   $("#resubSubmit").addEventListener("click", async () => {
     const err = $("#resubErr"), btn = $("#resubSubmit");
     const remark = ($("#resubRemark")?.value || "").trim();
-    const files = $("#resubFiles")?.files;
+    if (btn.disabled) return;
+    const picker = $("#resubMaterialBindings");
     const fail = (m) => { err.hidden = false; err.textContent = m; };
     if (!remark) return fail("请填写补充说明");
-    if (!files || !files.length) return fail("请至少选择一份补充材料");
+    let files, materialIds;
+    try { ({ files, ids: materialIds } = window.CampusApplicationMaterials.selection(picker, false)); }
+    catch (e) { return fail(e.message); }
+    if (!files.length) return fail("请至少选择一份补充材料");
     const fileError = validateFiles(files, cfg);
     if (fileError) return fail(fileError);
-    let materialIds;
-    try { materialIds = window.CampusApplicationMaterials.selection($("#resubMaterialBindings"), files, materials, false); }
-    catch (e) { return fail(e.message); }
     err.hidden = true;
     btn.disabled = true;
     btn.textContent = "提交中…";
+    window.CampusApplicationMaterials.disable(picker, true); $("#resubRemark").disabled = true;
     const fd = new FormData();
     fd.append("version", String(version));
     fd.append("studentRemark", remark);
@@ -4338,6 +4329,7 @@ async function openResubmit(id, version) {
     } catch (e) {
       btn.disabled = false;
       btn.textContent = "提交补充材料";
+      window.CampusApplicationMaterials.disable(picker, false); $("#resubRemark").disabled = false;
       fail(e.message || "提交失败");
     }
   });
@@ -4349,6 +4341,7 @@ window.openResubmit = openResubmit;
    后端：GET   /api/admin/applications?status&page&pageSize
          GET   /api/admin/applications/{id}
          PATCH /api/admin/applications/{id}/status  {status,remark,version}
+         PATCH /api/admin/applications/{id}/review  {status,remark,version}（统一提交）
    状态机（后端 ApplicationStatus.canReviewTo）：
          SUBMITTED → REVIEWING
          REVIEWING → NEED_MORE | APPROVED | REJECTED
@@ -4376,7 +4369,7 @@ function renderApplicationReview(vp) {
     <div class="page-head">
       <div>
         <div class="page-title">申请审核</div>
-        <div class="page-desc">按状态机处理学生申请，每次操作携带 version 做乐观锁校验</div>
+        <div class="page-desc">在同一窗口连续审核，确认结果后统一提交审核意见</div>
       </div>
       <button class="btn btn-sm" onclick="loadReviewList()">⟳ 刷新</button>
     </div>
@@ -4441,6 +4434,7 @@ async function openReviewDialog(id) {
     const attachments = data?.attachments || [];
     const events = data?.events || [];
     const actions = REVIEW_ACTIONS[a.status] || [];
+    const session = { id, version: a.version ?? 0, history: [a.status], busy: false };
     openModal(`
       <div class="detail-head">
         <div>
@@ -4488,28 +4482,59 @@ async function openReviewDialog(id) {
         <div class="detail-section">
           <h4>审核操作</h4>
           ${!actions.length
-            ? `<div class="form-hint">当前状态「${escapeHtml(a.status)}」已无可执行操作（后端状态机：SUBMITTED→REVIEWING→NEED_MORE/APPROVED/REJECTED，APPROVED→COMPLETED）。</div>`
+            ? `<div class="form-hint">${a.status === 'NEED_MORE' ? '等待学生补充材料后重新提交。' : '本次办理已结束，审核记录已保留。'}</div>`
             : `
+            <p class="form-hint">可连续完成各审核步骤；最后点击「提交审核结果」，统一保存结果和本次意见。</p>
+            <div id="reviewFlow" aria-live="polite"></div>
             <div class="form-row">
-              <label for="reviewRemark">审核意见 <span class="label-note">要求补材料 / 驳回时后端必填</span></label>
+              <label for="reviewRemark">本次审核意见 <span class="label-note">只需填写一次；要求补材料 / 驳回时必填</span></label>
               <textarea id="reviewRemark" class="input" rows="3" maxlength="4000" placeholder="填写审核意见（≤4000 字）"></textarea>
             </div>
             <div class="auth-alert" id="reviewErr" hidden></div>
-            <div class="form-actions">
-              ${actions.map(ac => `<button class="btn ${ac.to === "REJECTED" || ac.to === "NEED_MORE" ? "" : "btn-primary"}" data-review="${ac.to}">${ac.label}</button>`).join("")}
-            </div>`}
+            <div id="reviewActions" class="form-actions"></div>`}
         </div>
       </div>
     `, "affair-modal");
-    $$("[data-review]").forEach(btn => btn.addEventListener("click", () =>
-      submitReview(id, a.version ?? 1, btn.dataset.review, btn)));
+    if (actions.length) {
+      paintReviewSession(session);
+      $("#reviewActions").addEventListener('click', event => {
+        const button = event.target.closest('button');
+        if (!button || button.disabled || session.busy) return;
+        if (button.dataset.review) session.history.push(button.dataset.review);
+        else if (button.hasAttribute('data-review-back')) session.history.pop();
+        else if (button.hasAttribute('data-review-submit')) { submitReview(session, button); return; }
+        $("#reviewErr").hidden = true;
+        paintReviewSession(session);
+      });
+    }
   } catch (e) {
     openModal(modalError("无法加载申请详情", e.message), "affair-modal");
   }
 }
 window.openReviewDialog = openReviewDialog;
 
-async function submitReview(id, version, nextStatus, btn) {
+function paintReviewSession(session) {
+  const nextStatus = session.history.at(-1);
+  const steps = [
+    { status: 'REVIEWING', name: '开始审核' },
+    { status: 'APPROVED', name: '确认审核结果' },
+    { status: 'COMPLETED', name: '确认办理完成' }
+  ];
+  const index = ['SUBMITTED', 'REVIEWING', 'APPROVED', 'COMPLETED'].indexOf(nextStatus);
+  const terminal = ['NEED_MORE', 'REJECTED'].includes(nextStatus);
+  $("#reviewFlow").innerHTML = `<ol class="review-flow-steps">${steps.map((step, i) =>
+    `<li class="${!terminal && index > i ? 'is-done' : ''}"><span>${!terminal && index > i ? '✓' : i + 1}</span>${step.name}</li>`).join('')}</ol>
+    ${session.history.length > 1 ? `<p class="form-hint">待提交结果：${statusTag(nextStatus)}</p>` : ''}`;
+  const actions = REVIEW_ACTIONS[nextStatus] || [];
+  $("#reviewActions").innerHTML = `${session.history.length > 1 ? '<button class="btn" data-review-back>上一步</button>' : ''}
+    ${actions.map(action => `<button class="btn" data-review="${action.to}">${action.label}</button>`).join('')}
+    ${session.history.length > 1 ? '<button class="btn btn-primary" data-review-submit>提交审核结果</button>' : ''}`;
+}
+
+async function submitReview(session, btn) {
+  if (session.busy) return;
+  const { id, version } = session;
+  const nextStatus = session.history.at(-1);
   const err = $("#reviewErr");
   const remark = ($("#reviewRemark")?.value || "").trim();
   const needRemark = nextStatus === "NEED_MORE" || nextStatus === "REJECTED";
@@ -4517,17 +4542,21 @@ async function submitReview(id, version, nextStatus, btn) {
   if (needRemark && !remark) return fail(`「${REVIEW_LABEL[nextStatus] || nextStatus}」必须填写审核意见`);
   if (remark.length > 4000) return fail("审核意见不能超过 4000 字");
   err.hidden = true;
-  btn.disabled = true;
+  session.busy = true;
+  $$("#reviewActions button").forEach(button => button.disabled = true);
+  $("#reviewRemark").disabled = true;
   const original = btn.textContent;
   btn.textContent = "提交中…";
   try {
-    await apiPatch(`/api/admin/applications/${id}/status`, { status: nextStatus, remark, version });
+    await apiPatch(`/api/admin/applications/${id}/review`, { status: nextStatus, remark, version });
     closeModal();
     toast(`已${REVIEW_LABEL[nextStatus] || nextStatus}`, "success");
     loadReviewList();
     loadWorkbench(true);
   } catch (e) {
-    btn.disabled = false;
+    session.busy = false;
+    $$("#reviewActions button").forEach(button => button.disabled = false);
+    $("#reviewRemark").disabled = false;
     btn.textContent = original;
     fail(e.message || "审核失败");
   }
@@ -4762,14 +4791,20 @@ function renderStepRows() {
   const holder = $("#svcSteps");
   if (!holder) return;
   holder.innerHTML = svcDraft.steps.map((st, i) => `
-    <div class="sub-row" data-srow="${i}">
-      <input class="input" data-sfield="title" value="${escAttr(st.title)}" placeholder="步骤标题 *" />
-      <input class="input" data-sfield="responsibleDepartment" value="${escAttr(st.responsibleDepartment)}" placeholder="负责部门" />
-      <input class="input" data-sfield="estimatedTime" value="${escAttr(st.estimatedTime)}" placeholder="预计耗时" />
-      <input class="input" data-sfield="location" value="${escAttr(st.location)}" placeholder="地点" />
-      <textarea class="input" data-sfield="description" rows="2" placeholder="步骤说明">${escapeHtml(st.description)}</textarea>
-      <input class="input" data-sfield="requiredMaterials" value="${escAttr((st.requiredMaterials || []).join("，"))}" placeholder="本步骤所需材料（逗号分隔）" />
-      <button type="button" class="btn btn-sm" onclick="removeStepRow(${i})">删除</button>
+    <div class="sub-row service-step-editor" data-srow="${i}">
+      <div class="service-step-heading"><strong>步骤 ${i + 1}</strong><button type="button" class="btn btn-sm" onclick="removeStepRow(${i})">删除</button></div>
+      <div class="service-step-field"><label for="svc-step-${i}-title">步骤标题 *</label>
+        <input id="svc-step-${i}-title" class="input" data-sfield="title" value="${escAttr(st.title)}" placeholder="填写步骤标题" aria-required="true" /></div>
+      <div class="service-step-field"><label for="svc-step-${i}-department">负责部门</label>
+        <input id="svc-step-${i}-department" class="input" data-sfield="responsibleDepartment" value="${escAttr(st.responsibleDepartment)}" placeholder="填写负责部门" /></div>
+      <div class="service-step-field"><label for="svc-step-${i}-time">预计耗时</label>
+        <input id="svc-step-${i}-time" class="input" data-sfield="estimatedTime" value="${escAttr(st.estimatedTime)}" placeholder="填写预计耗时" /></div>
+      <div class="service-step-field"><label for="svc-step-${i}-location">地点</label>
+        <input id="svc-step-${i}-location" class="input" data-sfield="location" value="${escAttr(st.location)}" placeholder="填写办理地点" /></div>
+      <div class="service-step-field service-step-full"><label for="svc-step-${i}-description">步骤说明</label>
+        <textarea id="svc-step-${i}-description" class="input" data-sfield="description" rows="2" placeholder="填写本步骤的具体说明">${escapeHtml(st.description)}</textarea></div>
+      <div class="service-step-field service-step-full"><label for="svc-step-${i}-materials">本步骤所需材料（逗号分隔）</label>
+        <input id="svc-step-${i}-materials" class="input" data-sfield="requiredMaterials" value="${escAttr((st.requiredMaterials || []).join("，"))}" placeholder="例如：申请表，身份证明" /></div>
     </div>`).join("");
 }
 
