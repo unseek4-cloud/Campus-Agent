@@ -1,0 +1,22 @@
+.policy-status-tags { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.policy-upload-status { margin-top: 16px; padding: 18px 20px; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-1); }
+.policy-upload-status[hidden] { display: none; }
+.policy-upload-status h4 { margin: 0 0 10px; font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
+.policy-upload-status.is-success { border-color: var(--success); }
+.policy-upload-status.is-failed { border-color: var(--danger); }
+.policy-progress { min-width: 160px; max-width: 340px; }
+.policy-progress .progress-track { height: 5px; margin: 9px 0 7px; background: var(--bg-3); }
+.policy-progress .progress-fill { background: var(--success); }
+.policy-progress-label { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-2); line-height: 1.8; }
+.policy-progress-label > :last-child { margin-left: auto; white-space: nowrap; }
+.policy-progress-note { margin-top: 5px; font-size: 11px; line-height: 1.7; color: var(--text-3); overflow-wrap: anywhere; }
+.policy-progress-error { color: var(--danger); }
+.policy-upload-status .policy-progress { max-width: none; }
+.policy-upload-status.is-success .policy-progress-note { color: var(--success); }
+.policy-table-error { padding: 12px 16px; color: var(--danger); font-size: 12px; }
+.policy-table-error[hidden] { display: none; }
+@media (max-width: 768px) {
+  .policy-upload-status { padding: 16px; }
+  .policy-status-tags { gap: 6px; }
+  .policy-status-tags .tag { font-size: 10px; }
+}

@@ -1,0 +1,12 @@
+@import "./styles.css";
+@import "./chat-workspace.css";
+@import "./reply-feedback.css";
+@import "./chat-rail.css";
+@import "./spring-check.css";
+@import "./refined-ui.css";
+@import "./user-feedback.css";
+@import "./policy-progress.css";
+@import "./answer-markdown.css";
+.workspace-page { width: 100%; min-height: 0; }
+.qa-viewport .workspace-page { height: 100%; max-width: none; }
+#campus-root { height: 100%; }

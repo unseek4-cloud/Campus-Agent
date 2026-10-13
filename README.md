@@ -23,13 +23,13 @@ CampusAgent 是面向高校学生的事务智能问答与办事引导系统。�
 
 ## 对话分享：图片导出与公开分享链接
 
-静态问答页 AI 回复下方提供复制、回复评价、分享、重新生成、更多操作，点分享进入现有多选：可只把选中的几条消息复制为图片、导出 PNG 长图，或生成后端 token 的**免登录只读**公开链接（`#/share/<token>`，默认 30 天有效、可随时撤销）。图片由 Canvas 手绘，不依赖第三方库。
+问答页 AI 回复下方提供复制、回复评价、分享、重新生成、更多操作，点分享进入现有多选：可只把选中的几条消息复制为图片、导出 PNG 长图，或生成后端 token 的**免登录只读**公开链接（`#/share/<token>`，默认 30 天有效、可随时撤销）。图片由 Canvas 手绘，不依赖第三方库。
 
 启动自动执行 V8 增量迁移（`ai_conversation_share`）；接口、数据表、公开页行为、自动测试与边界见 [对话分享开发与验收说明](docs/chat-share.md)。
 
 ## AI 回复评价与管理员质量分析
 
-Vue 和静态版均支持逐条回复评价、修改/取消、历史状态恢复与保留原回答的重新生成；管理员可查看权限范围内的统计、分布与趋势、问题/回答/引用，人工标记差评原因和处理状态。启动自动执行 V9 增量迁移；后续新增管理员需显式授予数据范围。
+统一 Vue 前端支持逐条回复评价、修改/取消、历史状态恢复与保留原回答的重新生成；管理员可查看权限范围内的统计、分布与趋势、问题/回答/引用，人工标记差评原因和处理状态。启动自动执行 V9 增量迁移；后续新增管理员需显式授予数据范围。
 
 详细启动命令、权限 SQL、接口和逐步验收见 [AI 回复评价与质量分析说明](docs/ai-reply-feedback.md)。
 
@@ -42,8 +42,7 @@ Vue 和静态版均支持逐条回复评价、修改/取消、历史状态恢复
 ## 项目结构
 
 ```text
-frontend/             Vue 3 + Vite + Element Plus + Axios
-frontend-standalone/  原生 HTML/CSS/JS 前端（零依赖、免构建，与 frontend/ 功能等价）
+frontend/             Vue 3 + Vue Router + Vite（唯一前端，已统一原静态版样式与功能）
 backend/              Java 21 + Spring Boot 3 + MyBatis-Plus + MySQL
 ai-service/           Python + FastAPI
 docs/                 项目文档
@@ -62,32 +61,17 @@ scripts/              开发和运维脚本预留目录
 
 ## 启动前端
 
-仓库提供两套功能等价的前端，任选其一即可，都对接同一套后端 API。
+项目只保留 `frontend/` 一套 Vue 前端。原静态版的完整视觉和交互已经迁入，旧 Vue 页面与重复静态目录已清理。
 
-**Vue 版**（`frontend/`，需 Node.js 与依赖安装）：
-
-```bash
+```powershell
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
-默认地址：`http://localhost:5173`。
+默认地址为 `http://127.0.0.1:5173/`。Windows 可双击 `frontend/start.bat` 或 `frontend/启动.bat`；仅启动界面使用 `powershell -File frontend/start.ps1 -FrontendOnly`。开发时 `/api` 由 Vite 代理到 Java 后端。
 
-**静态版**（`frontend-standalone/`，零依赖、免构建，只需 Python 3）：
-
-```bash
-cd frontend-standalone
-python -m http.server 5500 --bind 127.0.0.1
-```
-
-Windows 也可直接双击 `frontend-standalone/start.bat`：脚本会自动挑选空闲端口、拉起后端与 AI 服务、打开浏览器，所有路径按自身位置推导，不含任何硬编码的本地路径。
-
-默认地址：`http://localhost:5500`。
-
-> ⚠️ **必须用 `http://` 访问，不要双击 `index.html`。** 用 `file://` 打开时页面没有 origin，后端 Cookie 会被浏览器丢弃，登录必然失败。
->
-> ⚠️ **跨端口要加白名单。** 后端 CORS 只放行 `AUTH_ALLOWED_ORIGINS` 中显式列出的来源（默认 `http://localhost:5173,http://127.0.0.1:5173`）。静态版跑在 5500 时，需在 `backend/.env` 里追加 `http://localhost:5500,http://127.0.0.1:5500` 并重启后端，否则登录会返回 403。完整说明与排错见 [静态前端说明](frontend-standalone/README.md)。
+验证使用 `npm run build`、`npm test` 和 `npm run test:browser`。启动、依赖、构建产物及部署配置见 [Vue 前端说明](frontend/README.md)，视觉优化与迁移记录见 [前端统一说明](docs/ui-vue-migration.md)。
 
 ## 启动 Java 后端
 

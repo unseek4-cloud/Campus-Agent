@@ -1,0 +1,34 @@
+.msg.bot > .msg-bubble.answer-markdown { font-size: 16px; line-height: 1.85; overflow-wrap: anywhere; }
+.answer-markdown p { margin: 0 0 16px; }
+.answer-markdown h2, .answer-markdown h3, .answer-markdown h4 { color: var(--text-1); font-weight: 650; line-height: 1.5; margin: 26px 0 12px; }
+.answer-markdown h2 { font-size: 23px; }
+.answer-markdown h3 { font-size: 20px; }
+.answer-markdown h4 { font-size: 18px; }
+.answer-markdown strong { color: var(--text-1); font-weight: 700; }
+.answer-markdown ul, .answer-markdown ol { margin: 14px 0 20px; padding-left: 26px; }
+.answer-markdown li { margin: 9px 0; padding-left: 4px; }
+.answer-markdown li > ul, .answer-markdown li > ol { margin: 7px 0; }
+.answer-markdown li::marker { color: var(--text-2); }
+.answer-markdown code { font-size: .88em; padding: 2px 6px; border-radius: 5px; background: var(--bg-2); font-family: Consolas, monospace; }
+.answer-markdown pre { margin: 16px 0; padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-1); overflow-x: auto; }
+.answer-markdown pre code { padding: 0; background: transparent; white-space: pre; }
+.answer-markdown blockquote { margin: 16px 0; padding: 10px 16px; border-left: 3px solid var(--border-strong); color: var(--text-2); background: var(--bg-1); }
+.answer-markdown blockquote p:last-child { margin-bottom: 0; }
+.answer-markdown hr { border: 0; border-top: 1px solid var(--border); margin: 24px 0; }
+.answer-markdown a { color: var(--info); text-decoration: underline; text-underline-offset: 3px; }
+.answer-table-scroll { overflow-x: auto; max-width: 100%; margin: 18px 0; border: 1px solid var(--border); border-radius: 12px; }
+.answer-table-scroll table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.answer-table-scroll th, .answer-table-scroll td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); min-width: 100px; }
+.answer-table-scroll th { font-weight: 650; background: var(--bg-1); }
+.answer-table-scroll tr:last-child td { border-bottom: 0; }
+.answer-markdown > :first-child { margin-top: 0; }
+.answer-markdown > :last-child { margin-bottom: 0; }
+.msg-cite .cite-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; max-width: 100%; font: inherit; font-size: 12px; line-height: 1.6; text-decoration: none; overflow-wrap: anywhere; text-align: left; }
+.cite-label { color: var(--text-3); white-space: nowrap; }
+.cite-open-icon { flex: 0 0 auto; }
+@media (max-width: 768px) {
+  .msg.bot > .msg-bubble.answer-markdown { font-size: 15px; }
+  .answer-markdown h2 { font-size: 21px; }
+  .answer-markdown h3 { font-size: 18px; }
+  .answer-markdown h4 { font-size: 16px; }
+}

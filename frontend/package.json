@@ -11,16 +11,16 @@
     "build": "vue-tsc --noEmit && vite build",
     "type-check": "vue-tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:browser": "npm run build && node tests/browser/workspace.chat-workspace.e2e.mjs && node tests/browser/workspace.feedback-profile.e2e.mjs && node tests/browser/workspace.policy-progress.e2e.mjs && node tests/browser/workspace.answer-sources.e2e.mjs && node tests/browser/workspace.application-materials.e2e.mjs && node tests/browser/workspace.application-review.e2e.mjs && node tests/browser/workspace.service-status.e2e.mjs && node tests/browser/workspace.visual.e2e.mjs"
   },
   "dependencies": {
-    "axios": "1.20.0",
-    "element-plus": "2.14.5",
     "vue": "3.5.42",
     "vue-router": "5.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "6.0.9",
+    "playwright-core": "1.63.0",
     "typescript": "6.0.3",
     "vite": "8.3.0",
     "vue-tsc": "3.3.11"

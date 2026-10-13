@@ -30,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {
     "spring.datasource.url=jdbc:h2:mem:share-test;MODE=MySQL;DB_CLOSE_DELAY=-1", "spring.datasource.driver-class-name=org.h2.Driver",
     "spring.datasource.username=sa", "spring.datasource.password=",
-    "spring.sql.init.schema-locations=classpath:material-test-schema.sql,classpath:db/migration/V5__auth_rbac.sql,classpath:db/migration/V7__chat_history.sql,classpath:db/migration/V8__conversation_share.sql,classpath:db/migration/V9__reply_feedback.sql",
+    "spring.sql.init.schema-locations=classpath:material-test-schema.sql,classpath:db/migration/V5__auth_rbac.sql,classpath:db/migration/V7__chat_history.sql,classpath:db/migration/V8__conversation_share.sql,classpath:db/migration/V9__reply_feedback.sql,classpath:db/migration/V11__user_profile.sql,classpath:db/migration/V12__reply_feedback_details.sql",
     "campus.auth.jwt-secret=dGVzdC1vbmx5LXJhbmRvbS1zZWNyZXQtbm90LWZvci1wcm9k"})
 @AutoConfigureMockMvc
 class ChatShareIntegrationTest {

@@ -28,7 +28,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {
     "spring.datasource.url=jdbc:h2:mem:feedback-test;MODE=MySQL;DB_CLOSE_DELAY=-1", "spring.datasource.driver-class-name=org.h2.Driver",
     "spring.datasource.username=sa", "spring.datasource.password=",
-    "spring.sql.init.schema-locations=classpath:material-test-schema.sql,classpath:db/migration/V5__auth_rbac.sql,classpath:db/migration/V7__chat_history.sql,classpath:db/migration/V8__conversation_share.sql,classpath:db/migration/V9__reply_feedback.sql",
+    "spring.sql.init.schema-locations=classpath:material-test-schema.sql,classpath:db/migration/V5__auth_rbac.sql,classpath:db/migration/V7__chat_history.sql,classpath:db/migration/V8__conversation_share.sql,classpath:db/migration/V9__reply_feedback.sql,classpath:db/migration/V11__user_profile.sql,classpath:db/migration/V12__reply_feedback_details.sql",
     "campus.auth.jwt-secret=dGVzdC1vbmx5LXJhbmRvbS1zZWNyZXQtbm90LWZvci1wcm9k"})
 @AutoConfigureMockMvc
 class ReplyFeedbackIntegrationTest {
@@ -86,6 +86,40 @@ class ReplyFeedbackIntegrationTest {
         mvc.perform(put(path(m)).cookie(student).contentType("application/json").content("{\"rating\":\"POSITIVE\"}")).andExpect(status().isForbidden());
         mvc.perform(put(path(m)).contentType("application/json").content("{\"rating\":\"POSITIVE\"}")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/admin/ai-quality/summary").cookie(student)).andExpect(status().isForbidden());mvc.perform(get("/api/admin/ai-quality/summary")).andExpect(status().isUnauthorized());
+    }
+    @Test void negativeDetailsPersistCanBeEditedAndArePrivate() throws Exception {
+        var turn=turn(student,null,"反馈详情");long message=turn.path("assistantMessageId").asLong(),conversation=turn.path("conversationId").asLong();
+        String body=json.writeValueAsString(Map.of("rating","NEGATIVE","reasons",List.of("INCORRECT","OUTDATED"),"comment","  引用的是旧版通知  "));
+        mvc.perform(csrf(put(path(message)).cookie(student)).contentType("application/json").content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.reasons[0]").value("INCORRECT"))
+                .andExpect(jsonPath("$.data.comment").value("引用的是旧版通知"));
+        var saved=messages(student,conversation).get(1).path("feedback");
+        assertEquals(2,saved.path("reasons").size());assertEquals("引用的是旧版通知",saved.path("comment").asText());
+        mvc.perform(csrf(put(path(message)).cookie(student)).contentType("application/json").content(body)).andExpect(status().isOk());
+        assertEquals(saved.path("updatedAt"),messages(student,conversation).get(1).path("feedback").path("updatedAt"));
+        var row=list(admin,"").path("items").get(0);assertEquals("OUTDATED",row.path("reasons").get(1).asText());
+        assertEquals("引用的是旧版通知",row.path("comment").asText());
+        var updated=json.writeValueAsString(Map.of("rating","NEGATIVE","reasons",List.of("NOT_HELPFUL")));
+        mvc.perform(csrf(put(path(message)).cookie(student)).contentType("application/json").content(updated))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.comment").value(""));
+        assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM ai_reply_feedback_detail",Integer.class));
+        var share=data(mvc.perform(csrf(post("/api/chat/conversations/"+conversation+"/shares").cookie(student))).andExpect(status().isOk()).andReturn());
+        var publicData=data(mvc.perform(get("/api/share/chat/"+share.path("token").asText())).andExpect(status().isOk()).andReturn());
+        assertFalse(publicData.toString().contains("NOT_HELPFUL"));
+        new ResourceDatabasePopulator(new ClassPathResource("db/migration/V12__reply_feedback_details.sql")).execute(Objects.requireNonNull(jdbc.getDataSource()));
+        assertEquals("NOT_HELPFUL",messages(student,conversation).get(1).path("feedback").path("reasons").get(0).asText());
+        rate(student,message,"POSITIVE").andExpect(status().isOk());assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ai_reply_feedback_detail",Integer.class));
+    }
+    @Test void negativeDetailsValidateAndAdministratorCanRateOwnReplies() throws Exception {
+        long message=turn(admin,null,"管理员反馈").path("assistantMessageId").asLong();
+        for(var body:List.of(Map.of("rating","NEGATIVE","reasons",List.of("UNKNOWN")),
+                Map.of("rating","NEGATIVE","comment","长".repeat(2001)),Map.of("rating","POSITIVE","reasons",List.of("OTHER"))))
+            mvc.perform(csrf(put(path(message)).cookie(admin)).contentType("application/json").content(json.writeValueAsBytes(body))).andExpect(status().isBadRequest());
+        mvc.perform(csrf(put(path(message)).cookie(admin)).contentType("application/json")
+                .content(json.writeValueAsBytes(Map.of("rating","NEGATIVE","reasons",List.of("STYLE")))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.reasons[0]").value("STYLE"));
+        mvc.perform(csrf(delete(path(message)).cookie(admin))).andExpect(status().isOk());
+        assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM ai_reply_feedback_detail",Integer.class));
     }
     @Test void concurrentDuplicateSubmissionsKeepOneRow() throws Exception {
         long m=turn(student,null,"并发评价").path("assistantMessageId").asLong();

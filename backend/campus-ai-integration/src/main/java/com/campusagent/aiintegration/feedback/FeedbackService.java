@@ -26,15 +26,36 @@ public class FeedbackService {
     }
     @Transactional
     public Feedback rate(long userId, long messageId, String rating) {
+        return rate(userId, messageId, new RatingRequest(rating, null, null));
+    }
+    @Transactional
+    public Feedback rate(long userId, long messageId, RatingRequest request) {
+        String rating = request.rating();
         if (!List.of("POSITIVE", "NEGATIVE").contains(rating == null ? "" : rating)) throw new IllegalArgumentException("评价类型无效");
+        var allowed = List.of("INCORRECT", "NOT_HELPFUL", "OUTDATED", "SLOW_OR_ERROR", "STYLE", "SAFETY", "OTHER");
+        var supplied = request.reasons() == null ? List.<String>of() : request.reasons();
+        if (supplied.size() > allowed.size() || supplied.stream().anyMatch(reason -> reason == null || !allowed.contains(reason)))
+            throw new IllegalArgumentException("反馈原因无效");
+        String reasons = String.join(",", allowed.stream().filter(supplied::contains).toList());
+        String comment = request.comment() == null ? "" : request.comment().trim();
+        if (comment.length() > 2000) throw new IllegalArgumentException("反馈说明最多2000字");
+        if (rating.equals("POSITIVE") && (!reasons.isEmpty() || !comment.isEmpty())) throw new IllegalArgumentException("仅回复不佳支持反馈说明");
         ownedAssistant(userId, messageId);
-        var old = jdbc.queryForList("SELECT rating FROM ai_reply_feedback WHERE user_id=? AND message_id=?", String.class, userId, messageId);
+        var old = jdbc.query("SELECT f.id,f.rating,COALESCE(d.reasons,''),COALESCE(d.user_comment,'') FROM ai_reply_feedback f "
+                + "LEFT JOIN ai_reply_feedback_detail d ON d.feedback_id=f.id WHERE f.user_id=? AND f.message_id=?",
+                (r,n) -> new Object[]{r.getLong(1),r.getString(2),r.getString(3),r.getString(4)}, userId, messageId);
+        boolean changed = old.isEmpty() || !old.getFirst()[1].equals(rating) || !old.getFirst()[2].equals(reasons) || !old.getFirst()[3].equals(comment);
         if (old.isEmpty()) jdbc.update("INSERT INTO ai_reply_feedback(user_id,message_id,rating) VALUES (?,?,?)", userId, messageId, rating);
-        else if (!old.getFirst().equals(rating)) jdbc.update("UPDATE ai_reply_feedback SET rating=?,updated_at=CURRENT_TIMESTAMP(3),"
+        else if (changed) jdbc.update("UPDATE ai_reply_feedback SET rating=?,updated_at=CURRENT_TIMESTAMP(3),"
                 + "issue_type='UNCLASSIFIED',handling_status='OPEN',admin_note='',reviewed_by=NULL,reviewed_at=NULL,version=version+1 "
                 + "WHERE user_id=? AND message_id=?", rating, userId, messageId);
+        if (changed) {
+            long feedbackId = jdbc.queryForObject("SELECT id FROM ai_reply_feedback WHERE user_id=? AND message_id=?", Long.class, userId, messageId);
+            jdbc.update("DELETE FROM ai_reply_feedback_detail WHERE feedback_id=?", feedbackId);
+            if (rating.equals("NEGATIVE")) jdbc.update("INSERT INTO ai_reply_feedback_detail(feedback_id,reasons,user_comment) VALUES (?,?,?)", feedbackId, reasons, comment);
+        }
         return jdbc.queryForObject("SELECT rating,updated_at FROM ai_reply_feedback WHERE user_id=? AND message_id=?",
-                (r,n) -> new Feedback(r.getString(1), r.getTimestamp(2).toLocalDateTime()), userId, messageId);
+                (r,n) -> new Feedback(r.getString(1), r.getTimestamp(2).toLocalDateTime(), FeedbackTypes.reasons(reasons), comment), userId, messageId);
     }
     @Transactional
     public void cancel(long userId, long messageId) {
@@ -87,15 +108,16 @@ public class FeedbackService {
         var filter = filter(adminId, rating, start, end);
         long total = jdbc.queryForObject("SELECT COUNT(*)" + FROM + filter.sql, Long.class, filter.args.toArray());
         var args = new ArrayList<>(filter.args); args.add(pageSize); args.add((page-1)*pageSize);
-        var items = jdbc.query("SELECT f.*,m.content AS answer,m.sources_json,"
+        var items = jdbc.query("SELECT f.*,d.reasons,d.user_comment,m.content AS answer,m.sources_json,"
                 + "(SELECT q.content FROM ai_message q WHERE q.conversation_id=m.conversation_id AND q.request_id=m.request_id AND q.role='USER') AS question"
-                + FROM + filter.sql + " ORDER BY f.updated_at DESC,f.id DESC LIMIT ? OFFSET ?", (r,n) -> {
+                + FROM + "LEFT JOIN ai_reply_feedback_detail d ON d.feedback_id=f.id " + filter.sql + " ORDER BY f.updated_at DESC,f.id DESC LIMIT ? OFFSET ?", (r,n) -> {
                     try {
                         String raw = r.getString("sources_json"); var node = raw == null ? null : json.readTree(raw);
                         if (node != null && node.isTextual()) node = json.readTree(node.textValue());
                         var reviewed = r.getTimestamp("reviewed_at");
                         return new FeedbackTypes.Record(r.getLong("id"), r.getLong("message_id"), r.getString("question"), r.getString("answer"), node,
                                 r.getString("rating"), r.getTimestamp("created_at").toLocalDateTime(), r.getTimestamp("updated_at").toLocalDateTime(),
+                                FeedbackTypes.reasons(r.getString("reasons")), Objects.toString(r.getString("user_comment"), ""),
                                 r.getString("issue_type"), r.getString("handling_status"), r.getString("admin_note"), reviewed == null ? null : reviewed.toLocalDateTime(), r.getInt("version"));
                     } catch (java.io.IOException e) { throw new IllegalStateException("Invalid feedback source metadata"); }
                 }, args.toArray());

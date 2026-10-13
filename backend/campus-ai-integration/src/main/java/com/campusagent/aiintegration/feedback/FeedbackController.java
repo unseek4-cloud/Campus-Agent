@@ -14,7 +14,7 @@ public class FeedbackController {
     public FeedbackController(FeedbackService service) { this.service = service; }
     @PutMapping("/api/chat/messages/{id}/feedback")
     public ApiResponse<Feedback> rate(@PathVariable long id, @RequestBody RatingRequest request, @AuthenticationPrincipal UserPrincipal user) {
-        return ApiResponse.success(service.rate(user.user().id(), id, request.rating()));
+        return ApiResponse.success(service.rate(user.user().id(), id, request));
     }
     @DeleteMapping("/api/chat/messages/{id}/feedback")
     public ApiResponse<Void> cancel(@PathVariable long id, @AuthenticationPrincipal UserPrincipal user) {

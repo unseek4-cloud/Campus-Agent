@@ -20,7 +20,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:h2:mem:auth-test;MODE=MySQL;DB_CLOSE_DELAY=-1", "spring.datasource.driver-class-name=org.h2.Driver",
         "spring.datasource.username=sa", "spring.datasource.password=",
-        "spring.sql.init.schema-locations=classpath:material-test-schema.sql,classpath:db/migration/V5__auth_rbac.sql",
+        "spring.sql.init.schema-locations=classpath:material-test-schema.sql,classpath:db/migration/V5__auth_rbac.sql,classpath:db/migration/V11__user_profile.sql",
         "campus.auth.jwt-secret=dGVzdC1vbmx5LXJhbmRvbS1zZWNyZXQtbm90LWZvci1wcm9k"})
 @AutoConfigureMockMvc
 class AuthIntegrationTest {
@@ -65,6 +65,9 @@ class AuthIntegrationTest {
         var student = login("20260001");
         mvc.perform(get("/api/auth/me").cookie(student)).andExpect(jsonPath("$.data.studentNo").value("20260001"));
         mvc.perform(get("/api/services").cookie(student)).andExpect(status().isOk());
+        mvc.perform(get("/api/knowledge/documents/missing/file").cookie(student)).andExpect(status().isNotFound());
+        mvc.perform(get("/api/knowledge/documents/missing/file").cookie(cookie)).andExpect(status().isNotFound());
+        mvc.perform(get("/api/knowledge/documents/missing/file")).andExpect(status().isUnauthorized());
     }
     @Test void studentForbiddenAnonymousUnauthorizedIncludingWritesAndUnknownAdminPaths() throws Exception {
         var student = login("20260001");
@@ -77,6 +80,19 @@ class AuthIntegrationTest {
         mvc.perform(get("/api/services")).andExpect(status().isUnauthorized());
         mvc.perform(get("/api/v1/health")).andExpect(status().isOk());
         mvc.perform(get("/api/admin/services").with(httpBasic("admin", "test-password"))).andExpect(status().isUnauthorized());
+    }
+    @Test void profileDetailsAreReturnedForCurrentAccountOnly() throws Exception {
+        long studentId=jdbc.queryForObject("SELECT id FROM user_account WHERE username='20260001'",Long.class);
+        jdbc.update("INSERT INTO user_profile(user_id,department,major,class_name) VALUES (?,?,?,?)", studentId,"计算机学院","软件工程","软工2601班");
+        var result=login("20260001","test-password");
+        assertEquals(200,result.getResponse().getStatus());
+        var cookie=result.getResponse().getCookie("CAMPUS_AUTH");
+        mvc.perform(get("/api/auth/me").cookie(cookie)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.department").value("计算机学院"))
+                .andExpect(jsonPath("$.data.major").value("软件工程"))
+                .andExpect(jsonPath("$.data.className").value("软工2601班"));
+        mvc.perform(get("/api/auth/me").cookie(login("admin"))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.major").isEmpty()).andExpect(jsonPath("$.data.className").isEmpty());
     }
     @Test void badCredentialsAndSqlInjectionAreIndistinguishable() throws Exception {
         for (String name : new String[]{"admin", "missing", "admin' OR '1'='1"}) {

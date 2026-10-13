@@ -63,9 +63,12 @@ public class ChatHistoryRepository {
     }
     public List<Message> messagesWithFeedback(long userId, long id) {
         var feedback = new HashMap<Long, com.campusagent.aiintegration.feedback.FeedbackTypes.Feedback>();
-        jdbc.query("SELECT f.message_id,f.rating,f.updated_at FROM ai_reply_feedback f JOIN ai_message m ON m.id=f.message_id "
+        jdbc.query("SELECT f.message_id,f.rating,f.updated_at,d.reasons,d.user_comment FROM ai_reply_feedback f "
+                + "LEFT JOIN ai_reply_feedback_detail d ON d.feedback_id=f.id JOIN ai_message m ON m.id=f.message_id "
                 + "JOIN ai_conversation c ON c.id=m.conversation_id WHERE f.user_id=? AND c.user_id=? AND c.id=?",
-                (org.springframework.jdbc.core.RowCallbackHandler) r -> feedback.put(r.getLong(1), new com.campusagent.aiintegration.feedback.FeedbackTypes.Feedback(r.getString(2), r.getTimestamp(3).toLocalDateTime())), userId, userId, id);
+                (org.springframework.jdbc.core.RowCallbackHandler) r -> feedback.put(r.getLong(1), new com.campusagent.aiintegration.feedback.FeedbackTypes.Feedback(
+                        r.getString(2), r.getTimestamp(3).toLocalDateTime(), com.campusagent.aiintegration.feedback.FeedbackTypes.reasons(r.getString(4)),
+                        Objects.toString(r.getString(5), ""))), userId, userId, id);
         return messages(userId, id).stream().map(m -> new Message(m.id(),m.requestId(),m.role(),m.content(),m.response(),m.createdAt(),feedback.get(m.id()))).toList();
     }
     public long message(long id, String requestId, String role, String content, String metadata) {

@@ -1,11 +1,13 @@
 # AI 回复操作栏、评价与质量分析：开发和验收说明
 
+> 前端已于 2026-10-13 合并为唯一 Vue 版本。本文中的旧静态入口与旧 Vue 组件路径为历史记录；当前启动、源码和测试命令见 [前端说明](../frontend/README.md) 与 [迁移记录](ui-vue-migration.md)。
+
 开发分支：`codex/ai-response-feedback`。本次同时支持 `frontend-standalone`（参考图一的界面）和 `frontend`（Vue）。评价、权限和统计均由同一 Java 后端负责；AI 服务不直接访问评价表。
 
 ## 功能和设计
 
 - 每条已保存的 AI 回复依次显示：复制、回复评价、分享、重新生成、更多操作。线性 SVG 图标提供悬停提示、焦点样式、点击反馈和手机触摸区域。
-- 评价菜单为“回复优秀”和“回复不佳”。选择另一项修改评价，再点已选项取消；“更多操作”也可取消评价。成功后展示对应图标和选中颜色，失败保留原状态。
+- 评价菜单为“回复优秀”和“回复不佳”。回复优秀可再次点击取消；回复不佳打开原因多选与选填说明弹窗，再次点击可编辑已保存详情。“更多操作”可取消评价。成功后展示对应图标和选中颜色，失败保留原状态。最新启动和验收见 [反馈与个人菜单](feedback-profile-acceptance.md)。
 - 每条回复单独评价；刷新、历史切换、重新登录从 MySQL 恢复。浏览器不缓存评价作为权威状态。
 - 静态版复制、消息多选、图片导出和公开分享链接继续使用现有实现；Vue 版复用现有后端分享接口，分享当前问题与回复、复制链接、撤销链接，新增配套公开只读页面。
 - 重新生成会在会话末尾增加一轮原问题和新回答，保留原回答及其评价。使用原问题之前的最多8条上下文，不混入后续其他问题。新请求保留 UUID 去重、会话生成锁和失败恢复机制；新记录保存原知识库 ID。升级前未保存知识库 ID 的旧回答按原有默认检索范围重新生成。
@@ -27,9 +29,9 @@
 
 | 方法和路径 | 请求/响应 |
 | --- | --- |
-| `PUT /api/chat/messages/{id}/feedback` | 请求 `{ "rating": "POSITIVE" }` 或 `NEGATIVE`；返回当前类型和修改时间 |
+| `PUT /api/chat/messages/{id}/feedback` | 请求 `{ "rating": "POSITIVE" }`；差评为 `{ "rating": "NEGATIVE", "reasons": ["INCORRECT"], "comment": "选填说明" }`；返回类型、修改时间、原因与说明 |
 | `DELETE /api/chat/messages/{id}/feedback` | 取消当前用户评价，重复取消也成功 |
-| `GET /api/chat/conversations/{id}/messages` | 原接口增加每条消息的 `feedback: {rating, updatedAt}` 或 `null` |
+| `GET /api/chat/conversations/{id}/messages` | 原接口增加每条消息的 `feedback: {rating, updatedAt, reasons, comment}` 或 `null` |
 | `POST /api/chat/messages/{id}/regenerate` | 请求 `{ "requestId": "UUID" }`；返回原 RAG 字段及新消息ID |
 | `GET /api/admin/ai-quality/summary` | `rating/startDate/endDate` 可选；返回统计、授权范围和逐日趋势 |
 | `GET /api/admin/ai-quality/feedback` | 同上加 `page/pageSize`，每页默认20、最多100；返回分页问题/回答/引用/处理信息 |
