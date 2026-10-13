@@ -1,269 +1,170 @@
-# CampusAgent 完整启动步骤与手动验收
+# CampusAgent 启动与手工验收
 
-项目根目录：`D:\AIC_ai-agent\Project\Campus-Agent`。
+本文是当前版本的统一启动入口。先准备 MySQL 和本地配置，再在三个独立终端启动 Java、Python 和 Vue。命令默认从仓库根目录开始；项目所在磁盘路径可自行选择，不依赖开发者的 tmp 文件、现有进程或旧打包结果。
 
-推荐顺序：MySQL → 后端 → AI Service → 前端。MySQL 是 Windows 服务，不需要长期占一个终端；其余三个服务各用一个 PowerShell 窗口，运行时保持窗口打开。2026-09-27 用户验收通过后，前端、后端和 AI Service 已按要求关闭，MySQL80 保持运行；下次使用请按以下步骤启动。
+## 环境准备
 
-## 第一步：MySQL
-
-打开 PowerShell，从根目录开始：
+需要 Node（package.json 声明 >=20.19.0）、npm、JDK 21、Maven、MySQL 8、Python 3.12。检查工具是否可调用：
 
 ```powershell
-cd D:\AIC_ai-agent\Project\Campus-Agent
-Get-Service MySQL80
+node --version
+npm --version
+java -version
+mvn -version
+py -3.12 --version
+mysql --version
+```
+
+这里采用 PowerShell；Python 在其他平台的依赖兼容性和部署步骤本次未验证。Windows 的 MySQL 服务名取决于安装方式，不保证是 MySQL80：
+
+```powershell
+Get-Service *mysql*
 Test-NetConnection 127.0.0.1 -Port 3306
 ```
 
-当前电脑真实服务名是 `MySQL80`。期望 Status 为 Running，TcpTestSucceeded 为 True。若服务停止，在管理员 PowerShell 执行：
+服务未启动时用查到的实际服务名启动。数据库端口、库名和账号与 backend/.env 一致；3306 和 campus_agent 是默认值，MySQL 密码与网页账号密码不同。
 
-```powershell
-Start-Service MySQL80
-```
+## 创建数据库与配置
 
-进一步验证数据库（密码是 MySQL 密码，和网页登录密码不同）：
-
-```powershell
-mysql -h localhost -P 3306 -u campus_agent -p --default-character-set=utf8mb4
-```
-
-账号若与 `backend/.env` 的 DB_USERNAME 不同，以 `.env` 为准。在 `mysql>` 输入：
+在 MySQL 客户端或 Workbench 中，只对全新环境执行建库：
 
 ```sql
-USE campus_agent;
-SELECT 1;
-SHOW TABLES;
+CREATE DATABASE IF NOT EXISTS campus_agent CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-沿用当前 `campus_agent` 数据库和 `backend/.env`，不要删除重建；后端启动自动执行 V6。全新机器才参考 `docs/auth-rbac.md` 配置数据库账号、JWT_SECRET 和初始用户。
+数据库连接账号需能在该库建表并读写；本项目不自动创建数据库用户。已有库不要删除重建。
 
-## 第二步：Terminal 1 启动后端
+仓库根目录复制缺失的配置文件：
 
 ```powershell
-cd D:\AIC_ai-agent\Project\Campus-Agent
-.\scripts\start-backend.ps1
+if (!(Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
+if (!(Test-Path ai-service/.env)) { Copy-Item ai-service/.env.example ai-service/.env }
 ```
 
-此命令读取已有 `backend/.env`，切换到 backend，运行当前已打包 JAR。本次已经打包最终代码。以后修改 Java 源码时，先在原后端窗口 Ctrl+C 停止，再执行：
+编辑 backend/.env，填入实际 DB_URL、DB_USERNAME、DB_PASSWORD，以及必需的 JWT_SECRET。模板中的 replace-me 只是占位值。保留已有有效配置。生成 JWT 密钥的命令兼容 Windows PowerShell：
 
 ```powershell
-cd D:\AIC_ai-agent\Project\Campus-Agent
-.\scripts\start-backend.ps1 -Build
+$campusJwtBytes = New-Object byte[] 32
+$campusJwtRandom = [Security.Cryptography.RandomNumberGenerator]::Create()
+$campusJwtRandom.GetBytes($campusJwtBytes)
+[Convert]::ToBase64String($campusJwtBytes)
+$campusJwtRandom.Dispose()
 ```
 
-Windows 上不要在旧后端仍运行时打包同一 JAR，否则会因文件被占用导致 repackage 失败。
+将输出填到 JWT_SECRET，一次生成后保存，不要每次启动更换。完整变量与默认值见 [后端说明](../backend/README.md#运行配置)。本地 HTTP 使用 AUTH_COOKIE_SECURE=false；生产 HTTPS 设 true。
 
-本机如默认 Maven 仓库连接失败，可用现有镜像设置先构建，再启动：
+ai-service/.env 中配置 AI_QWEN_API_KEY、AI_QWEN_BASE_URL、AI_QWEN_MODEL。普通检索不需聊天 Key，但有证据的生成需要。云 OCR 使用独立的 OCR 模型与 /responses 接口，可复用聊天 Key，endpoint 可用性须按实际账号确认。详见 [AI 服务](../ai-service/README.md)。
+
+## 旧库升级检查
+
+新库由 schema.sql 和 V3–V12 启动建表；当前不是 Flyway 迁移。V2 未注册为自动启动 SQL，只用于很早的 knowledge_document 旧表。
+
+先在实际数据库执行：
+
+```sql
+SHOW COLUMNS FROM knowledge_document;
+```
+
+表不存在时交给新库启动初始化。已存在时核对 parse_status、progress、total_pages、processed_pages、ocr_provider：全部存在则不要执行 V2；全部缺失时，在备份并确认当前旧表结构后显式执行 [V2 文件](../backend/campus-app/src/main/resources/db/migration/V2__document_ocr_progress.sql)。部分字段已存在的库需按实际差异人工升级，不能重复运行含 ADD COLUMN 的完整脚本。
+
+V3–V12 是当前初始化列表中的可重复建表 SQL；这不代表任意历史结构都会自动修正。完整表设计见 [数据库说明](../backend/README.md#数据库设计与升级)。
+
+## 终端一 Java 后端
+
+从仓库根目录执行：
 
 ```powershell
-cd D:\AIC_ai-agent\Project\Campus-Agent\backend
-mvn -s ..\tmp\maven-service-guide-settings.xml package
-cd D:\AIC_ai-agent\Project\Campus-Agent
-.\scripts\start-backend.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-backend.ps1 -Build
 ```
 
-镜像文件目前已存在于本机 tmp；新机器应使用自己的 Maven settings，不依赖 tmp 被 Git 同步。
+脚本读取 backend/.env，进入 backend，执行 mvn package（含测试）并运行 campus-app/target/campus-app-0.1.0-SNAPSHOT.jar。后端默认 8080。日常启动可省略 -Build；代码更新后需要重建。Windows 先停止旧后端再打包，避免同一 JAR 被占用。
 
-后端地址：`http://127.0.0.1:8080`。成功日志包括 `Tomcat started on port 8080` 和 `Started CampusAgentApplication`。在另一个空闲终端验证：
+直接在 backend 运行 mvn package、java -jar 也可，但需自行加载进程环境，不能依赖 .env 自动读取。Maven 镜像与缓存使用自己可用的设置，不要求存在旧 tmp/maven-service-guide-settings.xml。
+
+另开终端检查：
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8080/api/v1/health
 ```
 
-期望 `data.status=UP`。直接访问后端根路径不是健康检查；浏览器业务页面在 5173 端口。
+预期 data.status=UP；这不检查 Python、模型或向量库。
 
-## 第三步：Terminal 2 启动 AI Service
+## 首次创建应用账号和示例
 
-**新开一个 PowerShell 窗口**：
+后端完成建表后，另一个终端从仓库根运行：
 
 ```powershell
-cd D:\AIC_ai-agent\Project\Campus-Agent\ai-service
-.\.venv\Scripts\Activate.ps1
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\manage-accounts.ps1 -Action Seed
 ```
 
-当前 `.venv` 已存在。如果 PowerShell 不允许激活脚本，不必修改系统执行策略，直接执行虚拟环境 Python：
+只创建缺失的 admin、20260001、20260002，终端一次性输出随机密码，已有账号会跳过。本项目没有通用默认密码，也不会自动生成凭据文件。忘记密码时按 [账号说明](auth-rbac.md) 生成 BCrypt 并更新 SQL。
+
+新的 admin 不会因重启自动获得 AI 质量分析权限，需按 [反馈授权](ai-reply-feedback.md#管理员数据范围) 执行 SQL。申请审核和知识管理只需 ADMIN 角色。
+
+办事事项可以在界面创建。需要五项演示流程时，显式导入 [service_guide_examples.sql](../backend/campus-app/src/main/resources/db/seed/service_guide_examples.sql)，不会随启动自动导入。它们均为测试数据，不是学校政策；ID 由数据库生成，不能把某一台机器的 ID=1 作为所有环境的固定值。
+
+## 终端二 Python AI 服务
+
+从仓库根目录开始：
 
 ```powershell
-cd D:\AIC_ai-agent\Project\Campus-Agent\ai-service
+Set-Location ai-service
+if (!(Test-Path .venv/Scripts/python.exe)) { py -3.12 -m venv .venv }
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-两种方式二选一。全新环境才需要 `python -m venv .venv`、`.\.venv\Scripts\python.exe -m pip install -r requirements.txt`，并配置已有规范的 `.env`。不要覆盖当前带有效配置的 `.env`。
-
-AI 地址：`http://127.0.0.1:8000`。成功日志包括 `Application startup complete`、`Uvicorn running on http://127.0.0.1:8000`。
+已经安装完整依赖可省略 pip。无需激活脚本；main.py 读取当前目录的 .env。保留一个 worker。首次实际处理、查询或本地 OCR 才加载模型；模型缓存不存在时不要设置 HF_HUB_OFFLINE/TRANSFORMERS_OFFLINE 来阻断首次下载。
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8000/internal/v1/health
 ```
 
-期望 `data.status=UP`。健康检查只验证服务启动；真实问答还依赖外部 Qwen 可连接。当前验收发现 Qwen TLS 超时，独立网络检查也失败，需恢复本机网络/代理到 Qwen 的连通性后重跑真实问答。在线申请不依赖 Qwen；指南可返回数据库流程；OCR 已验证可回退到本地 Paddle。
+健康预期 UP，开发接口文档在 http://127.0.0.1:8000/docs。是否能够真实回答还取决于模型准备、索引、Key 和网络。
 
-## 第四步：Terminal 3 启动前端
+## 终端三 Vue 前端
 
-**再新开一个 PowerShell 窗口**：
+从仓库根目录开始：
 
 ```powershell
-cd D:\AIC_ai-agent\Project\Campus-Agent\frontend
-npm run dev -- --host 127.0.0.1
+Set-Location frontend
+npm ci
+npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
 ```
 
-当前依赖已安装。只有第一次安装或依赖变更才需要在 frontend 执行 `npm ci`。
+打开 `http://127.0.0.1:5173/`，未登录时在该页面显示登录表单。学生进入 `/#/qa`，管理员进入 `/#/dashboard`。当前不是 /login、/admin、/knowledge/search 等旧路由。
 
-成功时显示 `http://127.0.0.1:5173/`。浏览器打开：`http://127.0.0.1:5173/login`。不要用 8000 或 8080 打开学生页面。
+前端 /api 经 Vite 代理到 127.0.0.1:8080，源码只使用 VITE_API_BASE，默认同源。始终使用同一主机名，localhost 和 127.0.0.1 的 Cookie 与准备清单互不共享。页面表单、申请详情和审核弹窗没有独立 apply/detail 路由。
 
-保持同一浏览器域名使用 `127.0.0.1`，不要在登录后反复切换 localhost 和 127.0.0.1；它们的 Cookie 是分开的。
+## 按流程手工验收
 
-## 手动测试步骤
+这些是预期步骤，本次文档更新没有操作真实数据库、上传资料或调用云模型。
 
-先完成上面的 MySQL 和三个服务启动，确认两个健康检查为 UP。
+1. 分别登录学生和管理员，刷新确认身份恢复。学生访问管理员页面应回到可用主页并提示无权限；直接请求管理员 API 应返回 403。匿名请求受保护接口返回 401。
+2. 管理员进入 `/#/policy-mgr`，上传一份独立验收资料，等待 SUCCESS，核对处理阶段和片段数。重名内容去重、重命名、重新解析和删除按 [政策进度](policy-upload-progress.md) 检查。页面目前最多载入前 100 份文档，筛选不能当成全库分页查询。
+3. 学生进入 `/#/qa`，问资料中明确可回答的事实，核对来源和原文件页码。继续追问“对象是谁”，查看本轮检索信息。未知问题是否拒答需根据语料确认；不能假设任意未知表达必然被阈值挡住。
+4. 新建两段会话，检查返回页面、F5、切换、删除确认及两个用户隔离。主动退出再提交学生登录表单会先进入空白新对话，旧记录仍可从最近对话打开。
+5. 管理员进入 `/#/services-mgr` 创建/启用测试事项，设置条件、材料、识别词与步骤。学生问明确流程，核对卡片、材料模板、逐步确认和账号隔离。步骤勾选不代表审批。
+6. 学生从卡片点立即办理，或在 `/#/my-applications` 新建申请。逐项上传必交材料，填写说明，确认创建、重复在办保护和要求快照。
+7. 管理员在 `/#/review` 打开申请，选择审核阶段，提交结果。要求补交/驳回必须有原因；学生补交至少一个附件和说明后回到 SUBMITTED。再通过并办结，核对全部事件。详见 [申请状态机](service-application.md#状态与并发)。
+8. 申请页面附件按钮当前使用模板下载路径，预期可能 404；后端私有下载 API 已实现，正确路径见 [申请说明](service-application.md#附件与已知页面问题)。验收必须记录这一限制，不能把按钮存在视为下载正常。
+9. 问答评价、刷新恢复、原因编辑、重新生成、公开分享/撤销及管理员质量分析按 [反馈说明](ai-reply-feedback.md) 检查。生成分享后再发送消息，旧链接应保持原范围。
+10. 需要检查 AI 离线降级时只停止本次 AI 进程，再问明确能规则匹配的流程。数据库卡片可继续返回；普通 QA 会报 AI 不可用，模糊识别不保证返回指南。结束后恢复服务。
 
-### 测试 1：学生登录
-
-1. 打开 `http://127.0.0.1:5173/login`。
-2. 使用现有账号 `20260001` 和其现有密码。系统没有新增或重置密码；本机既有测试账号密码保存在忽略的 `tmp/auth-test-accounts.txt`，需要时在本机打开查看，不要提交该文件。
-3. 点击登录，应进入 `/`，显示张三、学号与“我的办事”。
-4. 刷新页面，应保持登录。
-
-### 测试 2：学生提交申请
-
-1. 点击“开始提问”，进入 `/knowledge/search`。
-2. 输入“学生证丢失了，怎么补办？”，点击发送。
-3. 在现有“学生证补办”办事指南卡片查看所需材料、流程。已有模板附件可以先点击下载。
-4. 点击“立即办理”，进入 `/student/services/1/apply`（当前库该事项 ID 为 1；以页面实际链接为准）。
-5. 确认申请人、学号只读；右侧仍为原办事指南。
-6. 填写“手动测试：学生证遗失，申请补办”。
-7. 选择真实 PDF、Word 或图片。默认单个文件不超过 20 MB。可点击“移除”后重新选择。
-8. 点击“提交申请”。按钮显示 loading，成功提示“申请提交成功。”，跳转新申请详情。
-9. 应显示 CA 开头申请编号、事项名、提交时间、已上传附件、状态“已提交”，时间线第一条“已提交”。记录该申请编号。
-10. 再进入相同事项办理页，应提示已有办理中申请，并提供“查看办理进度”。
-
-### 测试 3：我的办事
-
-1. 点击右上角“我的办事”，路由 `/student/applications`。
-2. 找到记录的申请编号，状态为“已提交”。
-3. 试用“办理中”筛选，申请仍在列表内。
-4. 点击“查看详情”，检查编号、事项、姓名、学号、说明、附件、时间与状态。
-5. 点击下载，检查原始文件名和内容正确。刷新后申请仍然存在。
-
-### 测试 4：管理员审核
-
-1. 点击“退出登录”，回到 `/login`。
-2. 使用现有 `admin` 账号和密码登录，进入 `/admin`。
-3. 点击侧边栏“办事申请管理”，路由 `/admin/applications`。
-4. 用“已提交”筛选找到编号，点击“查看详情”。
-5. 查看学生信息、账号、说明和材料，下载附件确认可读。
-6. 在“管理员意见”填写“正在审核。”，点击“开始审核”。
-7. 应提示状态更新，状态变为“审核中”，时间线新增审核记录。
-
-### 测试 5：学生查看进度
-
-1. 管理员退出，学生 20260001 登录。
-2. 进入“我的办事”，打开该申请。
-3. 确认“审核中”，管理员意见“正在审核。”正确显示。
-4. 已打开详情时可点击“刷新进度”获取最新状态。
-
-### 测试 6：待补充材料
-
-1. 学生退出，admin 登录，打开同一申请。
-2. 填写“请补充测试材料。”，点击“要求补充材料”。
-3. 状态应为“待补充材料”。
-4. admin 退出，学生登录，打开该申请，确认醒目提示和管理员意见。
-5. 在补充材料区域填写“已补充测试材料”，选择至少一个新文件。
-6. 点击“重新提交”，应提示补充材料已上传，并回到“已提交”。
-7. 原附件继续保留，新增文件可下载，原审核意见与历史不丢失。
-
-### 测试 7：审核通过
-
-1. 学生退出，admin 登录，找到申请。
-2. **补交后先点击“开始审核”**，由已提交进入审核中。
-3. 填写“材料齐全，审核通过。”，点击“审核通过”。
-4. admin 退出，学生登录，详情应显示“已通过”。
-
-### 测试 8：办结
-
-1. 学生退出，admin 登录，打开已通过的申请。
-2. 填写“办理完成。”，点击“标记办结”，在确认框点击“确认”。
-3. admin 退出，学生登录，确认状态“已办结”、办结时间和完整时间线。
-4. 不应再显示补充材料上传区域。
-5. 再点击原事项“立即办理”，允许创建新的申请。若测试拒绝，则从审核中点击“审核不通过”，填写原因并确认；拒绝后也可重新申请。
-
-### 测试 9：权限
-
-1. 保持学生登录，地址栏输入 `http://127.0.0.1:5173/admin/applications`，应跳到 `/forbidden`。
-2. 在学生浏览器开发者工具 Console 执行：
-
-```javascript
-fetch('/api/admin/applications', { credentials: 'include' }).then(r => console.log(r.status))
-// 应为 403
-```
-
-3. 测试真实审核 API 的角色校验（把 123 换成当前申请 ID）：
-
-```javascript
-const csrf = (await (await fetch('/api/auth/csrf')).json()).data;
-const review = await fetch('/api/admin/applications/123/status', {
-  method: 'PATCH', credentials: 'include',
-  headers: { 'Content-Type': 'application/json', [csrf.headerName]: csrf.token },
-  body: JSON.stringify({ status: 'COMPLETED', remark: '越权测试', version: 0 })
-});
-console.log(review.status); // 403，即使 CSRF 正确也无权审核
-```
-
-4. 退出登录，再执行 `fetch('/api/student/applications').then(r => console.log(r.status))`，应为 401。也可在无 Cookie 的 PowerShell 执行 `curl.exe -i http://127.0.0.1:8080/api/student/applications`。
-5. 若使用另一现有测试学生 `20260002`，直接请求第一位学生的 `/api/student/applications/{id}`、其附件下载地址，应返回 403。不存在的申请返回 404。后端自动化已覆盖这一组测试。
-6. admin 访问 `/student/services/1/apply` 应被路由阻止，后台不能以管理员身份创建学生申请。
-
-### 测试 10：数据库检查
-
-在 MySQL 客户端执行：
+数据库只读核查可用：
 
 ```sql
-USE campus_agent;
-SELECT id, application_no, service_item_id, service_name,
-       user_id, applicant_name, student_no, status, active_slot,
-       student_remark, admin_remark, version,
-       submitted_at, updated_at, completed_at
-FROM service_application
-ORDER BY id DESC LIMIT 20;
-
--- 把 123 改成刚才申请的 id
-SELECT id, application_id, original_filename, content_type, file_size, uploaded_at
-FROM service_application_attachment WHERE application_id = 123;
-
-SELECT id, from_status, to_status, actor_name, actor_role, remark, created_at
-FROM service_application_event WHERE application_id = 123 ORDER BY id;
-
--- 正常应返回空结果，说明没有重复办理中申请
-SELECT user_id, service_item_id, COUNT(*) AS active_count
-FROM service_application WHERE active_slot = 1
-GROUP BY user_id, service_item_id HAVING COUNT(*) > 1;
+SELECT id, display_name, status, parse_status, progress, chunk_count FROM knowledge_document;
+SELECT user_id, service_item_id, COUNT(*) AS n FROM service_application
+WHERE active_slot=1 GROUP BY user_id,service_item_id HAVING COUNT(*)>1;
+SELECT id,application_no,status,version FROM service_application ORDER BY id DESC LIMIT 20;
+SELECT application_id,from_status,to_status,actor_name,remark FROM service_application_event ORDER BY id;
 ```
 
-自动浏览器测试会清理自己创建的记录，因此验收结束后查询不到那条自动申请是正常的。手动创建的申请会保留，拒绝或办结后可重新测试；不要为了重新测试删除原账号、事项或重建数据库。
+## 停止、排查与重跑
 
-## 旧功能回归
+手动启动的三个终端用 Ctrl+C 停止各自服务。start.ps1 启动的后台服务需另外管理，按 Enter 只停止前端。端口占用先核对已有实例，避免重复启动。
 
-学生登录后再次尝试普通政策问答、指南查询、模板下载；管理员尝试知识库文本上传与图片 OCR。恢复 Qwen 网络后，使用现有 `existingFeatures.e2e.mjs` 验证答案确实引用新上传证据。当前普通问答的外部连接问题见交付说明，不要通过放开 RBAC 或修改 Cookie 处理来解决网络故障。
+数据库失败先检查真实连接和权限；JWT_SECRET 无效会阻止 Java 启动；Python 依赖/本地模型异常与 Qwen 上游超时要分别排查；重排禁用会返回 RERANK_UNAVAILABLE，不应误写为知识库缺失。完整错误含义见 [AI README](../ai-service/README.md)。
 
-## 关机后重新开发速查表
-
-开机先确认 MySQL80 运行，再打开 **3 个终端**：
-
-| 窗口 | 目录 | 命令 |
-| --- | --- | --- |
-| Terminal 1 后端 | D:\AIC_ai-agent\Project\Campus-Agent | `.\scripts\start-backend.ps1` |
-| Terminal 2 AI | D:\AIC_ai-agent\Project\Campus-Agent\ai-service | `.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000` |
-| Terminal 3 前端 | D:\AIC_ai-agent\Project\Campus-Agent\frontend | `npm run dev -- --host 127.0.0.1` |
-
-| 入口 | 地址 |
-| --- | --- |
-| 浏览器 / 学生端 | http://127.0.0.1:5173/ |
-| 登录 | http://127.0.0.1:5173/login |
-| AI 问答 / 办事指南 | http://127.0.0.1:5173/knowledge/search |
-| 我的办事 | http://127.0.0.1:5173/student/applications |
-| 管理员后台 | http://127.0.0.1:5173/admin |
-| 管理员申请管理 | http://127.0.0.1:5173/admin/applications |
-| 管理员知识库 | http://127.0.0.1:5173/admin/knowledge |
-| 办事事项管理 | http://127.0.0.1:5173/admin/services |
-
-停止自己开的服务时在对应窗口 Ctrl+C。若提示端口占用，先检查旧实例是否仍在运行，不要重复启动多个服务。
+测试命令见 [总览](../README.md#验证)。本次结果与待确认项统一在 [文档索引](README.md#文档检查与待确认项)，真实部署、学校资料、模型质量及性能需要单独补充。
