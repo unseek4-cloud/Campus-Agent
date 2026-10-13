@@ -1,166 +1,205 @@
 # CampusAgent
 
-CampusAgent 是一个校园事务问答与办事引导项目。目前实现了政策资料入库、带来源的 RAG 问答、结构化办事指南，以及项目内的申请、补交和管理员审核流程。学生可以查政策、下载材料模板、保存对话和评价回答；管理员负责维护知识库、事项和申请记录。
+统一登录已接入：[账号创建、BCrypt、SQL、启动与手动验收完整指南](docs/auth-rbac.md)。首次启动需要配置 `JWT_SECRET`。
 
-本项目由 AIC 海底小纵队开发与维护。这里介绍当前代码已经实现的内容，学校政策、办理要求和实际审批结果仍需由资料维护者核实。
 
-## 当前功能
+CampusAgent 是面向高校学生的事务智能问答与办事引导系统。本仓库包含文档知识库检索和 RAG 智能问答链路。
 
-| 模块 | 已实现的内容 | 使用边界 |
-| --- | --- | --- |
-| 登录与权限 | MySQL 账号、BCrypt、JWT HttpOnly Cookie、可撤销会话、CSRF、STUDENT/ADMIN 角色 | 账号通过工具和 SQL 维护，没有注册、学校统一身份认证或后端自助改密接口 |
-| 知识库 | 上传、SHA-256 去重、异步解析、处理进度、重命名、重新解析、删除 | 当前管理一个配置的知识库；没有政策发布版本、生效日期和旧版本过滤 |
-| 问答与检索 | 向量召回、CrossEncoder 重排、时间证据校验、问题改写、答案及来源 | 生成依赖千问；来源表示进入 Context 的片段，不等于逐句事实验证 |
-| 办事引导 | 事项识别、查询意图分流、条件、材料、步骤、部门与来源 | 明确匹配流程时可在 AI 失败后返回数据库指南；模糊表达仍可能依赖 AI |
-| 准备清单 | 按账号和事项保存材料勾选、步骤推进、回退、重置 | 保存在浏览器，不能代替申请审核，不跨设备同步 |
-| 在线申请 | 必交材料逐项校验、要求快照、附件、补交、状态和事件历史 | 是 CampusAgent 内部流程，未对接学校审批系统；页面附件下载地址有已知不一致 |
-| 聊天记录 | 新建、恢复、切换、删除、请求去重、重新生成 | 后端按当前用户隔离；学生主动登录后先进入空白对话，历史可手动打开 |
-| 分享与反馈 | 消息多选、Canvas 图片导出、公开只读链接、评价和质量分析 | 分享固定创建时的消息范围；质量分析另需数据库授权 |
-| 个人资料与管理视图 | 主题切换、个人资料、概览、审计追溯视图、只读设置 | 空资料有虚构展示兜底；审计页汇总现有记录，没有独立审计日志或导出接口 |
+本项目目前由AIC  海底小纵队 队伍负责开发与维护
 
-各功能的接口、数据和验收步骤见 [文档索引](docs/README.md)。
+## 智能办事流程引导 V1
 
-## 技术栈与目录
+新增结构化办事引导及管理员事项管理。学生端继续使用 `/api/rag/chat`，只有匹配到事项且明确需要办理流程时才展示条件、材料、步骤与来源卡片；资格、政策、费用、截止时间等问题继续原 RAG。明确的办理请求在 AI 离线时仍能返回数据库流程。管理员入口为 `/admin/services`。五项示例需显式导入 SQL，均标记为测试数据，不代表学校政策。
 
-前端依赖以 [package.json](frontend/package.json) 和锁文件为准：Vue 3.5.42、Vue Router 5.3.1、Vite 8.3.0、TypeScript 6.0.3。当前使用原生 fetch，没有 Element Plus 或 Axios。
+数据库升级、Windows 启动、API、测试问题、文件清单及功能边界见 [办事流程 V1 开发与验收说明](docs/service-guide-v1.md)。可用 `scripts/start-backend.ps1` 读取既有 `backend/.env` 启动 Java。
 
-Java 使用 JDK 21、Spring Boot 3.5.16、Spring Security 和 MySQL。项目引入 MyBatis-Plus 3.5.17，但当前业务 Repository 主要通过 JdbcTemplate 执行参数化 SQL。Python 使用 FastAPI、pypdf、PDFium、PaddleOCR、Sentence Transformers、Chroma 和 httpx，版本见 [requirements.txt](ai-service/requirements.txt)。
+## 智能办事进度跟踪 V1.1
+
+学生可在办事卡片中完成当前步骤、回退、查看进度和重新开始；各事项进度及材料勾选按业务编码独立保存到当前浏览器。仅表示用户确认完成引导步骤，不代表学校审批。无需修改数据库或 API，管理员预览与普通 RAG 保持兼容。
+
+实现结构、Windows 启动、缓存算法、测试结果与已知限制见 [办事进度 V1.1 开发与验收说明](docs/service-progress-v1.1.md)。
+
+查询意图与事项匹配的分离、自动测试、真实浏览器验收和逐步启动说明见 [查询意图路由修复](docs/query-intent-routing.md)。
+
+## 对话分享：图片导出与公开分享链接
+
+问答页 AI 回复下方提供复制、回复评价、分享、重新生成、更多操作，点分享进入现有多选：可只把选中的几条消息复制为图片、导出 PNG 长图，或生成后端 token 的**免登录只读**公开链接（`#/share/<token>`，默认 30 天有效、可随时撤销）。图片由 Canvas 手绘，不依赖第三方库。
+
+启动自动执行 V8 增量迁移（`ai_conversation_share`）；接口、数据表、公开页行为、自动测试与边界见 [对话分享开发与验收说明](docs/chat-share.md)。
+
+## AI 回复评价与管理员质量分析
+
+统一 Vue 前端支持逐条回复评价、修改/取消、历史状态恢复与保留原回答的重新生成；管理员可查看权限范围内的统计、分布与趋势、问题/回答/引用，人工标记差评原因和处理状态。启动自动执行 V9 增量迁移；后续新增管理员需显式授予数据范围。
+
+详细启动命令、权限 SQL、接口和逐步验收见 [AI 回复评价与质量分析说明](docs/ai-reply-feedback.md)。
+
+## 所需材料附件 / 表格模板下载
+
+管理员可在 `/admin/services` 编辑任意事项，为每项材料上传、下载、替换或删除一个可选附件；学生卡片按后台数据展示蓝色下载链接，保留中文文件名。支持 DOC、DOCX、PDF、XLS、XLSX、ZIP，默认 20 MB，复用 UUID 文件存储，不进入 RAG。
+
+启动自动执行 V4 增量迁移；完整文件清单、数据库 / API、存储配置、认证、启动命令及手动验收见 [材料附件开发与验收说明](docs/material-attachments.md)。
+
+## 项目结构
 
 ```text
-frontend/
-  src/components/              Vue 页面外壳、登录、问答和个人菜单
-  src/workspace/               API 调用、各业务视图及交互
-  src/modules/serviceguide/    TypeScript 准备进度模型
-  tests/                       单元及浏览器回归
-backend/
-  campus-app/                  唯一启动模块、知识库管理、SQL 和集成测试
-  campus-identity/             认证、账号、会话及本地账号工具
-  campus-affair/               事项、模板附件、申请和审核
-  campus-ai-integration/       AI 客户端、问答编排、历史、分享和评价
-  campus-shared/               响应、异常、UUID 文件存储
-  campus-policy/               预留模块
-  campus-question/             预留模块
-  campus-audit/                预留模块
-ai-service/
-  app/api/                     内部 HTTP 接口
-  app/core/                    配置和依赖装配
-  app/services/                解析、切块、检索、证据过滤和问答编排
-  app/infrastructure/          OCR、PDF、DOCX、模型适配
-  app/llm/                     千问 Provider 和 Prompt
-  app/vector_store/            向量库抽象与 Chroma 实现
-docs/                          功能说明和开发检查记录
-scripts/                       启动、账号、验收与资料维护工具
-deploy/                        部署说明，尚无容器或反向代理配置文件
+frontend/             Vue 3 + Vue Router + Vite（唯一前端，已统一原静态版样式与功能）
+backend/              Java 21 + Spring Boot 3 + MyBatis-Plus + MySQL
+ai-service/           Python + FastAPI
+docs/                 项目文档
+deploy/               部署配置预留目录
+scripts/              开发和运维脚本预留目录
 ```
 
-```mermaid
-flowchart LR
-  U[浏览器 Vue] -->|登录 Cookie 与 CSRF /api| J[Java Spring Boot]
-  J --> M[(MySQL 业务数据)]
-  J --> F[原文件 模板 私有申请附件]
-  J -->|内部 HTTP| P[Python FastAPI]
-  P --> V[(Chroma)]
-  P --> E[本地 Embedding Rerank PaddleOCR]
-  P --> Q[千问聊天与云 OCR]
-```
+## 环境要求
 
-三个应用进程分别启动；Java 后端内部是模块化单体，并非每个 Maven 模块各起一个服务。Python 不访问业务 MySQL，浏览器业务请求只发给 Java。
+- Node.js 20.19+ 或 22.12+
+- npm 10+
+- JDK 21
+- Maven 3.6.3+
+- Python 3.11–3.13（AI 服务 OCR 当前在 Python 3.12 上验证）
+- MySQL 8.x
 
-## 环境与启动
+## 启动前端
 
-需要 Node.js 满足 `frontend/package.json` 的 `>=20.19.0` 声明、JDK 21、Maven、MySQL 8 和 Python。本文给出 Python 3.12 的 Windows 命令；其他 Python 版本与平台的依赖安装兼容性待确认，不沿用旧文档中未经本次验证的完整版本区间。
-
-完整的新环境准备、JWT 密钥、旧库升级、账号初始化和手工验收统一放在 [启动说明](docs/service-application-startup.md)。已有环境可在三个独立 PowerShell 窗口执行以下命令，均从仓库根目录开始：
+项目只保留 `frontend/` 一套 Vue 前端。原静态版的完整视觉和交互已经迁入，旧 Vue 页面与重复静态目录已清理。
 
 ```powershell
-# 窗口一：先核对 backend/.env 的数据库连接和 JWT_SECRET
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start-backend.ps1 -Build
-```
-
-```powershell
-# 窗口二：已创建虚拟环境并安装依赖
-Set-Location ai-service
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-```powershell
-# 窗口三
-Set-Location frontend
+cd frontend
 npm ci
-npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
+npm run dev
 ```
 
-后端启动脚本读取 `backend/.env`；直接 `java -jar` 不会自动读取它。Python Settings 从当前工作目录读取 `.env`，因此在 `ai-service` 目录运行。首次复制环境模板时应保留已有文件：
+默认地址为 `http://127.0.0.1:5173/`。Windows 可双击 `frontend/start.bat` 或 `frontend/启动.bat`；仅启动界面使用 `powershell -File frontend/start.ps1 -FrontendOnly`。开发时 `/api` 由 Vite 代理到 Java 后端。
+
+验证使用 `npm run build`、`npm test` 和 `npm run test:browser`。启动、依赖、构建产物及部署配置见 [Vue 前端说明](frontend/README.md)，视觉优化与迁移记录见 [前端统一说明](docs/ui-vue-migration.md)。
+
+## 启动 Java 后端
+
+先创建数据库并配置环境变量：
+
+```sql
+CREATE DATABASE campus_agent CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+```
+
+PowerShell 示例：
 
 ```powershell
-if (!(Test-Path backend/.env)) { Copy-Item backend/.env.example backend/.env }
-if (!(Test-Path ai-service/.env)) { Copy-Item ai-service/.env.example ai-service/.env }
+$env:DB_URL = "jdbc:mysql://localhost:3306/campus_agent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+$env:DB_USERNAME = "campus_agent"
+$env:DB_PASSWORD = "replace-me"
+cd backend
+mvn clean package
+java -jar campus-app/target/campus-app-0.1.0-SNAPSHOT.jar
 ```
 
-Windows 还可双击 `frontend/start.bat` 或 `frontend/启动.bat`。脚本会尝试启动缺失的后端和 AI 服务，但不会安装 Python 依赖、创建数据库或生成 JWT 密钥；已有 JAR 默认会被复用。仅启动前端使用 `powershell -File frontend/start.ps1 -FrontendOnly`。详见 [前端说明](frontend/README.md)。
+健康检查：`http://localhost:8080/api/v1/health`。Java 后端通过
+`AI_SERVICE_BASE_URL`（默认 `http://localhost:8000`）访问 Python AI 服务。
 
-## 页面和接口地址
+## 启动 AI 服务
 
-当前前端使用 Vue Router 的 hash 路由，地址是 `http://127.0.0.1:5173/#/...`。登录是同一应用中的界面状态，没有独立的 `/login` 路由。
+PowerShell 示例：
 
-| 页面 | 路径 |
-| --- | --- |
-| 智能问答 | `/#/qa` |
-| 事务概览 | `/#/dashboard` |
-| 政策检索、办事引导 | `/#/search`、`/#/affairs` |
-| 我的申请 | `/#/my-applications` |
-| 管理员政策、事项管理 | `/#/policy-mgr`、`/#/services-mgr` |
-| 申请审核、质量分析 | `/#/review`、`/#/ai-quality` |
-| 审计追溯、只读设置 | `/#/audit`、`/#/settings` |
-| 公开分享 | `/#/share/<token>` |
+```powershell
+cd ai-service
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-Java 健康接口：`GET http://127.0.0.1:8080/api/v1/health`。AI 健康接口：`GET http://127.0.0.1:8000/internal/v1/health`，开发文档：`http://127.0.0.1:8000/docs`。健康响应只说明进程能够响应，不证明模型、索引或云接口可用。Java 没有 Swagger 配置。
+Linux/macOS 示例：
 
-## 核心业务流程
+```bash
+cd ai-service
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-管理员上传政策资料后，Java 保存 UUID 原文件和 MySQL 元数据，通过最多 2 个工作线程和 16 个排队任务调用 Python。Python 根据文件类型提取文字，PDF 仅对文本不足的页执行 OCR，再清洗、切块、批量生成向量并写入 Chroma。前端约每 2 秒轮询 Java 进度；最终成功由 Java 写入 MySQL 后确认。
+健康检查：`http://localhost:8000/internal/v1/health`，OpenAPI 文档：`http://localhost:8000/docs`。
 
-知识库允许 PDF、DOCX、TXT、MD、XLSX、PPTX、PNG、JPG/JPEG，默认单文件 20 MB。模板附件允许 DOC、DOCX、PDF、XLS、XLSX、ZIP；学生申请附件允许 PDF、DOC、DOCX、PNG、JPG/JPEG。三类用途和白名单不能混用，模板与申请材料均不进入 RAG。
+首次处理文档时会下载并加载 Embedding 模型，首次检索时会加载 Rerank
+模型。扫描页在 `hybrid` 模式下优先调用 Qwen OCR，失败时下载并加载 PaddleOCR 模型；本地模型在同一 AI 服务进程内只初始化一次。OCR 的 Windows 配置和验收步骤见 [升级指南](docs/ocr-upgrade.md)。
 
-发送问题时，Java 先保存用户消息，从数据库取最近最多 8 条上下文，再判断事项和查询意图。资格、政策与普通咨询走 RAG；只有有效事项匹配且意图为 `SERVICE_GUIDE` 才返回数据库流程卡片。Python 的问题改写只用于检索，最终回答使用本轮问题和本轮 Context，历史回答不作为政策证据。
+## RAG 检索开发链路
 
-Java 问答请求示例：
+```text
+PDF / DOCX
+  → 文本提取（PDF 无文本页才执行 OCR）
+  → 按页、段落和句子边界切块
+  → Sentence Transformers Embedding
+  → Chroma 持久化
+  → 查询 Embedding
+  → 余弦相似度候选召回
+  → 本地 CrossEncoder Rerank
+  → 时间类问题的日期证据校验
+  → Rerank 分数过滤与 Context Builder
+  → 千问 OpenAI Compatible API
+  → Java API
+  → 前端答案和引用来源
+```
+
+检索学生接口（需登录）：`POST http://localhost:8080/api/knowledge/search`。
+问答学生接口（需登录）：`POST http://localhost:8080/api/rag/chat`。
+
+前端问答页：`http://localhost:5173/knowledge/search`，原始检索结果在“检索调试”区域。
+
+## 多轮问答
+
+问答会话及消息按登录用户持久化到 MySQL，按轮展示回答和对应来源。发送新问题时，Java 从当前用户的会话中读取最近 8 条上下文，浏览器不再提供可信历史。刷新、页面切换和重新登录均恢复记录；“新建对话”保留旧记录。详见 [聊天历史验收](docs/chat-history.md)。
+
+```text
+当前问题 + 最近历史 → Python Query Rewriter → 独立检索问题
+→ 原有 Retrieval / Rerank / Context Builder → 基于本次知识库 Context 的回答与来源
+```
+
+Query Rewrite 只补全省略的主题或代词，例如将“对象是谁？”补成“2026级新生心理测评对象是谁？”。改写问题仅用于检索；最终回答针对原问题，历史 Assistant 文本不会进入最终回答 Prompt，也不会作为学校事实或引用来源。改写失败时使用原问题继续检索。无 `history` 的旧单轮请求直接跳过改写，接口保持兼容。
+
+Java 公共接口 `POST /api/rag/chat` 的多轮请求示例：
 
 ```json
 {
-  "query": "需要准备哪些材料？",
-  "knowledgeBaseId": "campus-default",
-  "conversationId": 12,
-  "requestId": "5a4d68f0-106e-4a2c-beba-9e7658748a11"
+  "query": "对象是谁？",
+  "history": [
+    { "role": "user", "content": "2026级新生心理测评什么时候？" },
+    { "role": "assistant", "content": "2026年9月19日至22日。" }
+  ]
 }
 ```
 
-先用 `POST /api/chat/conversations` 获取自己的实际会话 ID；每次新问题用新的 UUID，重试同一请求才复用。旧 `history` 字段虽仍被 DTO 接受，公共接口实际只使用数据库历史。省略会话 ID 会新建会话。具体响应和并发规则见 [聊天历史](docs/chat-history.md)。
+响应的 `data.rewrittenQuery` 可在问答页每轮的“本轮调试信息”中查看。来源只对应本次进入 Context 的 Chunk。`AI_CONVERSATION_MAX_MESSAGES` 控制 Python 最多用于改写的最近消息数，默认 8；Java 从数据库最多取最近 8 条，每条上下文截取最多 4000 字符，存储的完整回答不截断。前端不再使用 `VITE_CONVERSATION_MAX_MESSAGES`。`AI_QUERY_REWRITE_ENABLED=false` 可关闭改写；`AI_QUERY_REWRITE_TEMPERATURE=0` 是默认改写温度。这些设置写在各自的 `.env.example` 中，实际密钥只放本地 `.env`。
 
-申请从已启用事项进入弹窗，身份取登录账号，必交材料在 Java 逐项校验并保存要求快照；管理员审核和学生补交写入状态事件。该流程没有调用外部学校系统。详见 [在线申请](docs/service-application.md)。
+本地验证：入库心理测评通知后，在网页先问“2026级新生心理测评什么时候？”，再问“对象是谁？”或“在哪里进行？”，核对 `rewrittenQuery` 和对应来源；随后问“奖学金申请需要什么材料？”，确认改写没有混入心理测评；再问知识库不存在的“火星校区怎么坐飞船过去？”，应返回“根据当前知识库暂未找到相关信息。”。自动测试：在 `ai-service` 运行 `python -m pytest`，在 `backend` 运行 `mvn test`，在 `frontend` 运行 `npm run build`。自动多轮测试使用模拟 Provider，不消耗千问额度。
 
-## 数据和当前限制
+在 `ai-service/.env` 填入 `AI_QWEN_API_KEY` 后即可使用问答。千问模型、地址、超时和 Context 过滤参数见 [`ai-service/README.md`](ai-service/README.md)。
 
-MySQL 保存账号、文档元数据、事项、申请、聊天、分享及反馈，共 20 张表。SQL、约束和迁移顺序见 [后端说明](backend/README.md)。新库自动建表；很早的旧库若缺少 OCR 进度字段，需要先人工核对 V2，不能直接把所有迁移文件重复执行。
+若本机可直连千问但问答报连接超时，检查系统代理是否失效。千问客户端默认使用 `AI_QWEN_TRUST_ENV=false` 直连；确需代理时再设为 `true`，详见 AI 服务 README。
 
-默认运行数据：`backend/var/documents`（含 `materials` 和 `applications` 子目录）、`ai-service/var/chroma`。前者相对于 Java 工作目录；后者由 Python 代码相对于 AI 服务根目录解析。启动方式变化时应核对路径，部署与备份见 [部署说明](deploy/README.md)。
+文档处理、删除向量和 AI 内部检索接口的调用示例见
+[`ai-service/README.md`](ai-service/README.md)。
 
-目前没有政策版本治理、关键词与向量混合检索、流式生成、跨设备准备清单、复杂审批引擎、独立审计系统或经验证的生产部署包。前端改密契约、私有申请附件链接及知识库范围限制见 [检查记录](docs/README.md#文档检查与待确认项)。真实学校资料、云模型质量、性能与试点成果需单独验证。
+## 当前边界
 
-## 验证
+- 浏览器只访问 Java 后端，不直接访问 AI 服务。
+- Java 后端负责业务、权限和 MySQL 数据。
+- Python 服务只承载文档解析、OCR、Embedding、向量存储和检索等 AI 能力。
+- 业务模块只能通过公开契约协作，禁止跨模块访问 Mapper、Entity 或数据表。
 
-```powershell
-# frontend 目录
-npm test
-npm run build
-npm run test:browser
+## 管理员知识库
 
-# backend 目录
-mvn test
+启动三个服务后访问 [管理员端](http://localhost:5173/admin)。`/admin` 展示真实文档统计和最近上传，`/admin/knowledge` 提供搜索、类型与状态筛选、分页、批量上传、详情、重命名、重新解析和删除。Swagger 与 Python OpenAPI 继续用于开发调试；日常知识库管理请使用管理员页面。所有业务接口现在使用数据库账号、Spring Security RBAC、JWT HttpOnly Cookie 和 CSRF 保护。请先按 [统一登录与账号管理](docs/auth-rbac.md) 配置 JWT_SECRET 并初始化账号，再从 `/login` 登录。STUDENT 进入学生端，ADMIN 进入现有后台。生产部署使用 HTTPS。
 
-# ai-service 目录
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe -m pytest -q --basetemp ../tmp/pytest-campus
-```
+上传支持 PDF、DOCX、TXT、Markdown、XLSX、PPTX、PNG、JPG/JPEG；不支持 DOC/XLS/PPT 等旧版 Office 格式。默认单文件上限 20 MB，由 Java 的 `ADMIN_MAX_UPLOAD_SIZE_MB` 配置，Python 的 `AI_MAX_PDF_SIZE_MB` 应设为相同或更高。前端从 Java 配置接口读取上限；Java 与 Python 均校验文件类型和内容。TXT/Markdown 使用 UTF-8；PDF 保留现有文本层与扫描页 OCR；DOCX 保留现有解析器；XLSX 按工作表提取表头和行；PPTX 按幻灯片提取文字及页码；图片也使用 OCRManager。所有格式复用同一清洗、Chunk、Embedding、Chroma 入库流程。
 
-浏览器回归使用 Playwright Core、浏览器和拦截的 API；Java 集成测试使用 H2；Python 多数模型与云接口测试使用替身。它们不能代替真实 MySQL、云 OCR、千问答案及新环境部署验收。本次文档核对的实际检查结果集中记录在 [文档索引](docs/README.md)，其他功能文档保留可重跑步骤，不重复写不同阶段的测试总数。
+Java 在上传时计算 SHA-256，并通过 `(knowledge_base_id, file_hash)` 唯一约束防止同内容以不同文件名重复入库。元数据存入 MySQL 的 `knowledge_document` 表，原文件保存到 `ADMIN_DOCUMENT_STORAGE_PATH`（默认从 backend 工作目录计算的 `var/documents`），Chunk 和引用信息保存在 Chroma。`schema.sql` 在新数据库启动时创建元数据表；已有数据库执行 [V2 迁移](backend/campus-app/src/main/resources/db/migration/V2__document_ocr_progress.sql)。上传后后台解析，失败保留文档记录和原文件，状态为 `FAILED`，可重新解析。删除先清除 Chroma 向量，再清理原文件和数据库记录；任何步骤失败时 API 不返回成功。重命名同步更新 Chroma 的 `file_name` 与 `source` 引用元数据，不重新计算 Embedding。
+
+新增格式时，在 `ai-service/app/services/document_parsers.py` 实现返回 `DocumentPage` 的解析器，将扩展名、MIME 和文件头校验加入 `ParserRegistry`，再于 `get_document_service()` 注册。后续 Chunk、Embedding 与向量存储无需修改。
+
+手工验收：进入 `/admin/knowledge` 上传一份文档，确认解析状态与片段数；将同一文件改名再上传，应显示重复提示且文档数不增加；在文档操作菜单中重命名后到学生端提问并核对来源；执行重新解析后检查片段数；删除后检查列表和学生端检索均不再出现该文档。自动验证命令：`ai-service/.venv/Scripts/python.exe -m pytest -q --basetemp .pytest-tmp`、在 `backend` 运行 `mvn test`、在 `frontend` 运行 `npm run build`。需要 MySQL、模型和千问 Key 的真实端到端问答验收仍须在完整运行环境执行。
+
+## AI 问答历史记录
+
+聊天正文现在按登录用户保存到 MySQL，支持页面返回、刷新、重新登录恢复，以及新建、切换和删除会话。启动后端会自动执行 V7 migration。详见 [聊天历史功能与从 MySQL 启动开始的手动验收步骤](docs/chat-history.md)。

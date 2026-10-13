@@ -1,54 +1,112 @@
-# 文档 OCR 与旧库升级
+# 管理员文档 OCR 升级：Windows 启动与验收
 
-当前管理员上传保存文件后立即返回，Java 后台工作线程等待 Python 解析完成。Python 先读 PDF 文本层，文本不足的页才渲染和 OCR；云端可失败回 Paddle，全部格式最终复用清洗、切块、Embedding 和 Chroma。
+## 流程
 
-完整环境和启动命令见 [统一启动](service-application-startup.md)，OCR 参数以 [AI README](../ai-service/README.md#ocr-与进度) 及 config.py 为准，本文重点说明旧库和验收边界。
+原流程是 Java 计算 SHA-256 并去重、同步调用 Python、pypdf 按页提取文本、无文本页顺序渲染并由 PaddleOCR 识别、清洗、Chunk、批量 Embedding、Chroma 入库，最后更新 MySQL。多页扫描 PDF 的顺序本地推理使上传请求长期等待。
 
-## 已有数据库检查
+现在上传保存文件后立即返回 `taskId=documentId` 和 `PROCESSING`，后台执行解析。Python 仍先提取文本层，只把低于阈值的页面按 200 DPI 渲染成图片。Qwen OCR 在有限并发下识别；`hybrid` 模式出错时使用原有 PaddleOCR 单例，最终按原页码合并。Java API 每 1.5 秒接收前端轮询并转发 Python 的实时进度。Embedding 继续使用现有批量实现。
 
-新库 schema.sql 已包含五个进度字段，V2 没有注册为自动启动 SQL。对早期旧 knowledge_document 表先执行：
+## 已有 MySQL 数据库迁移
+
+已有 `knowledge_document` 表时，在启动新 Java 版本**之前**执行以下完整 SQL 一次。新数据库由 `schema.sql` 自动创建这些字段。迁移文件是 `backend/campus-app/src/main/resources/db/migration/V2__document_ocr_progress.sql`。
 
 ```sql
+ALTER TABLE knowledge_document
+    ADD COLUMN parse_status VARCHAR(24) NOT NULL DEFAULT 'UPLOADED',
+    ADD COLUMN progress INT NOT NULL DEFAULT 0,
+    ADD COLUMN total_pages INT NOT NULL DEFAULT 0,
+    ADD COLUMN processed_pages INT NOT NULL DEFAULT 0,
+    ADD COLUMN ocr_provider VARCHAR(32) NOT NULL DEFAULT 'none';
+
+UPDATE knowledge_document
+SET parse_status = CASE status WHEN 'SUCCESS' THEN 'COMPLETED' WHEN 'FAILED' THEN 'FAILED' ELSE 'UPLOADED' END,
+    progress = CASE status WHEN 'SUCCESS' THEN 100 ELSE 0 END;
+```
+
+在 PowerShell 输入 `mysql -u campus_agent -p campus_agent`，输入数据库密码后，在出现 `mysql>` 提示符时输入：
+
+```sql
+source D:/AIC_ai-agent/Project/Campus-Agent/backend/campus-app/src/main/resources/db/migration/V2__document_ocr_progress.sql
 SHOW COLUMNS FROM knowledge_document;
 ```
 
-核对 parse_status、progress、total_pages、processed_pages、ocr_provider。全部缺失且确认对应旧结构时，在备份后按 [V2__document_ocr_progress.sql](../backend/campus-app/src/main/resources/db/migration/V2__document_ocr_progress.sql) 显式执行；已有字段不可重复 ADD COLUMN，部分已存在需人工按差异处理。
+看到 `parse_status`、`progress`、`total_pages`、`processed_pages`、`ocr_provider` 即成功。
 
-V2 新增字段并把 SUCCESS 映射 COMPLETED/100、FAILED 映射 FAILED，其他状态为 UPLOADED。它是一次性 ALTER，不是可重复的 Flyway 迁移。V3–V12 的当前启动建表机制不能自动修复任意旧结构。
+## AI 服务环境变量
 
-## OCR 流程和限制
+保留 `ai-service/.env` 已有配置，加入或修改以下值。真实 Key 只放本地 `.env`，不要提交到 Git。
 
-```text
-PDF → pypdf 按页提取
-  → 清洗文字 >=50 字符：使用原文本
-  → 不足：PDFium 200 DPI 渲染该页
-      → Qwen /responses
-      → hybrid 失败回 PaddleOCR
-  → 按原页码合并 → 清洗/切块/Embedding/索引
+```dotenv
+AI_OCR_ENABLED=true
+AI_OCR_MODE=hybrid
+AI_OCR_ALLOW_CLOUD=true
+AI_OCR_MAX_CONCURRENCY=4
+AI_OCR_DPI=200
+AI_OCR_TEXT_THRESHOLD=50
+AI_OCR_MAX_PAGES_PER_DOCUMENT=50
+AI_OCR_DEVICE=cpu
+AI_QWEN_OCR_ENABLED=true
+AI_QWEN_OCR_MODEL=qwen3.5-ocr
+AI_QWEN_OCR_API_KEY=
+AI_QWEN_OCR_BASE_URL=
+AI_QWEN_OCR_TIMEOUT=120
+AI_QWEN_OCR_MAX_RETRIES=2
+AI_EMBEDDING_BATCH_SIZE=32
 ```
 
-默认 AI_OCR_MODE=hybrid、AI_OCR_ALLOW_CLOUD=true、AI_OCR_MAX_CONCURRENCY=4、AI_OCR_MAX_PAGES_PER_DOCUMENT=50、AI_OCR_DEVICE=cpu、AI_OCR_ENABLE_MKLDNN=false。并发信号量限制 PDF 页任务，不保证所有图片解析任务统一限额。页数上限只统计需要 OCR 的 PDF 页。
+`AI_QWEN_OCR_API_KEY` 留空时复用 `AI_QWEN_API_KEY`，再读取进程环境中的 `DASHSCOPE_API_KEY`。OCR 模型独立于聊天模型 `AI_QWEN_MODEL`。OCR Base URL 留空时复用 `AI_QWEN_BASE_URL`。使用 `qwen3.5-ocr` 时，建议填写与 Key 地域匹配的百炼业务空间兼容地址，例如 `https://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`。`AI_OCR_MODE=paddle` 完全本地；`AI_OCR_MODE=qwen` 的云端失败会使任务失败；`AI_OCR_ALLOW_CLOUD=false` 无论模式如何都强制本地。首次本地识别会加载或下载 Paddle 模型，后续使用缓存。
 
-Qwen OCR 模型默认 qwen3.5-ocr，Key 空时依次复用 AI_QWEN_API_KEY、进程 DASHSCOPE_API_KEY，base URL 空时复用 AI_QWEN_BASE_URL。云请求追加 /responses；聊天追加 /chat/completions。OCR timeout 默认 120 秒、最多 2 次重试。模型/Key/地域/业务空间是否支持该 endpoint 要实际确认，不凭配置名称写成已成功联调。
+## Windows 启动
 
-AI_OCR_MODE=paddle 完全本地，qwen 模式云端失败则失败；allow_cloud=false 强制本地。AI_OCR_ENABLED=false 只关闭 PDF 扫描页回退，图片解析仍调用 OCRManager。文字层已经足够的 PDF 页不会对嵌入截图/复杂表格再做区域识别，DOCX/PPTX 内图片也不执行 OCR。
+先确认 MySQL 已启动、数据库已创建且迁移已执行。打开三个 PowerShell 窗口。
 
-本地 Paddle 懒加载并复用预测锁，当前配置 PP-OCRv6。任一 PDF 需要识别页失败会使严格模式整体失败，Java 尝试清理向量并保存失败提示。已有旧索引在重建时先删除，失败不会自动恢复。
+**窗口 1，Python AI 服务：**
 
-## 进度与重启
+```powershell
+cd D:\AIC_ai-agent\Project\Campus-Agent\ai-service
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+# 编辑 .env，填入 Qwen Key 和对应的 OCR Base URL
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
 
-AI 进度仅单进程内存，百分比是阶段权重加页比例，不是速度/剩余时间测量。Java 处理中写入最多 99，成功后 MySQL 100；当前前端约 2 秒轮询，详见 [政策进度](policy-upload-progress.md)。
+看到 `Application startup complete` 后，在浏览器打开 `http://localhost:8000/internal/v1/health`。
+进度暂存在 AI 服务进程内存中，因此当前部署请保持一个 Uvicorn worker；文档记录和最终状态仍保存在 MySQL。Java 重启会把未完成任务标记为失败，可从管理员页面重新解析。
 
-保持一个 Uvicorn worker。Java 重启把未完成文档标记 FAILED，管理员需重新解析；Python 重启丢失进度，也不自动续任务。原文件在 Java 工作目录的 var/documents，索引在 ai-service/var/chroma，部署须持久化。
+**窗口 2，Java 后端：**
 
-## 手工验收
+```powershell
+cd D:\AIC_ai-agent\Project\Campus-Agent\backend
+$env:DB_URL = "jdbc:mysql://localhost:3306/campus_agent?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true"
+$env:DB_USERNAME = "campus_agent"
+$env:DB_PASSWORD = "你的数据库密码"
+mvn clean package -DskipTests
+java -jar campus-app/target/campus-app-0.1.0-SNAPSHOT.jar
+```
 
-1. 文字 PDF：核对无需 OCR、页数和来源；短文字页可能低于阈值触发 OCR，不能只凭“文字 PDF”保证 scanned=0。
-2. 扫描 PDF：核对每页 OCR、页码顺序、Provider 与最终片段；云异常时 hybrid 本地回退。
-3. 文字/扫描混合 PDF：仅低文本页处理，查询各页独有内容并核对来源。
-4. 多页样本：记录实际 OCR、Embedding 和总耗时；比较模式时使用相同文件和环境，单独记录冷启动。50 个扫描页等于默认上限，不会因相等自动超限；超过 50 才触发。
-5. 无效 Key/超时/本地模式：仅在独立验收配置中测试并恢复，记录回退或明确失败；不把 Key、网络、GPU 状态写成仓库事实。
-6. 重名相同内容上传：去重不增加文档；失败后重解析重用 ID；两种引擎失败不保留新的残缺索引。清理失败仍应查日志。
-7. 学生在 /#/qa 核对真实回答与来源，无证据和 AI 故障分别处理，不能只靠健康接口验收。
+看到 Spring Boot 启动完成后，在浏览器打开 `http://localhost:8080/api/v1/health`。
 
-这些步骤本次未运行，真实 OCR 质量与耗时待补充。自动测试在 Python tests/unit 的 PDF、OCR、parsers、document_service，以及 tests/integration 的文档 API/Chroma，通常用模拟引擎和临时目录。运行命令见 [AI 测试](../ai-service/README.md#测试与模块位置)，本次结果见 [索引](README.md#本次检查与验证)。
+**窗口 3，前端：**
+
+```powershell
+cd D:\AIC_ai-agent\Project\Campus-Agent\frontend
+npm install
+npm run dev
+```
+
+在浏览器打开 `http://localhost:5173/admin/knowledge`。
+
+## 一步一步验收
+
+1. 上传普通文字 PDF。页面显示处理进度直至“已入库”；AI 日志中 `scanned=0`，没有页级 OCR 日志。列表的 OCR 方式是“无需 OCR”。学生端在 `/knowledge/search` 提问 PDF 中明确出现的内容，答案应带该文档来源。
+2. 上传三页扫描 PDF。日志出现 `provider=qwen` 和 `qwen=3`；列表最终页数为 3，状态“已入库”。若 Key 或地址不可用，混合模式会显示本地回退。
+3. 上传 20 页扫描 PDF。观察 `OCR 识别中 1 / 20` 到 `20 / 20`，百分比不倒退；记录日志的 `qwen=20`、`ocr_seconds`、`embedding_seconds`、`total_seconds`。要与本地旧方式比较，等待该任务完成后把 `AI_OCR_MODE` 改为 `paddle`，重启 Python 服务，对**同一文档**点击“重新解析”，记录第二次的 OCR 和总耗时；测试后恢复 `hybrid`。再分别用 10 页和 50 页扫描 PDF 做同样对照。若 50 页超过设置的扫描页上限，先提高 `AI_OCR_MAX_PAGES_PER_DOCUMENT`。
+4. 上传“文字页、扫描页、文字页”的混合 PDF。日志应只出现扫描页的 OCR 页号；详情页数为 3。学生端分别问文字页和扫描页中的独有内容，确认引用仍指向正确页。
+5. 将 `AI_QWEN_OCR_API_KEY` 暂时设为无效值并重启 Python 服务，上传**另一份**扫描 PDF。日志出现 Qwen 请求失败及 `fallback=paddle`；列表显示“Qwen → PaddleOCR”。恢复 Key 后重启。测试超时可把 `AI_QWEN_OCR_TIMEOUT` 暂时设得很短，再上传另一份文件。
+6. 将 `AI_OCR_MODE=paddle` 或 `AI_OCR_ALLOW_CLOUD=false`，重启 Python 服务并上传新的扫描 PDF。日志不应出现 Qwen 请求，列表显示 PaddleOCR。测试后恢复变量并重启。
+7. 把已成功上传的文件改名后再次上传。页面提示重复并指向已有文档；数据库文档数、OCR 页数和向量数不增加。
+8. 对失败文档点击“重新解析”，确认仍是同一文档 ID，并从解析、OCR、Chunk、Embedding 到入库重新运行。若两种 OCR 都失败，状态应为“处理失败”，学生端检索不应看到该失败文档的片段。
+9. 回归测试 RAG：进入学生端 `/knowledge/search`，问一条刚入库文档中的事实，确认回答和引用；再问未知事实，确认仍按原有知识库边界回答。多轮问答可先问主题，再问“对象是谁？”，核对本轮改写和来源。
+
+自动测试：在 `ai-service` 执行 `.\.venv\Scripts\python.exe -m pytest -q --basetemp .pytest-tmp`，在 `backend` 执行 `mvn test`，在 `frontend` 执行 `npm run build`。单元测试使用模拟 Qwen/Paddle，不消耗 API 额度；真实云端调用、MySQL 和浏览器全链路需在三个服务及数据库运行后手工验收。
